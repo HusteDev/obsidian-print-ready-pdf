@@ -1,18 +1,20 @@
 import { MarkdownView, Notice, Plugin, TFile } from 'obsidian';
 import { PDFMakeSettings, DEFAULT_SETTINGS, ExportMode } from './types';
-import { parseMarkdown } from './markdownParser';
 import { PDFExporter } from './pdfExporter';
 import { PDFMakeSettingTab } from './settings';
+import { ExportProgress } from './progress';
 
 export default class PDFMakePlugin extends Plugin {
     settings: PDFMakeSettings;
+    /** Single-flight guard: one export at a time. */
+    private exporting = false;
 
     async onload() {
         await this.loadSettings();
 
         this.addCommand({
             id: 'export-pdf',
-            name: 'Export to PDF (default mode)',
+            name: 'Print-Ready PDF: export (default mode)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
                     if (!checking) this.exportCurrentFile(this.settings.defaultMode);
@@ -24,7 +26,7 @@ export default class PDFMakePlugin extends Plugin {
 
         this.addCommand({
             id: 'export-pdf-print',
-            name: 'Export to PDF (print optimized)',
+            name: 'Print-Ready PDF: export (print optimized)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
                     if (!checking) this.exportCurrentFile('print');
@@ -36,7 +38,7 @@ export default class PDFMakePlugin extends Plugin {
 
         this.addCommand({
             id: 'export-pdf-preserve',
-            name: 'Export to PDF (preserve formatting)',
+            name: 'Print-Ready PDF: export (preserve formatting)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
                     if (!checking) this.exportCurrentFile('preserve');
@@ -50,7 +52,7 @@ export default class PDFMakePlugin extends Plugin {
         // for === markers so users know where page breaks will land.
         this.registerMarkdownPostProcessor((el) => {
             el.querySelectorAll('p').forEach(p => {
-                if (p.textContent?.trim() === '===') {
+                if (this.settings.pageBreakSyntax !== 'callout' && p.textContent?.trim() === '===') {
                     p.addClass('pdfmake-page-break-marker');
                     p.textContent = '— Page Break —';
                 }
@@ -59,18 +61,18 @@ export default class PDFMakePlugin extends Plugin {
 
         this.registerEvent(
             this.app.workspace.on('file-menu', (menu, file, source) => {
-                if (source !== 'more-options' || !(file instanceof TFile) || file.extension !== 'md') return;
+                if (!['more-options', 'file-explorer-context-menu'].includes(source) || !(file instanceof TFile) || file.extension !== 'md') return;
                 menu.addSeparator();
                 menu.addItem(item => item
-                    .setTitle('Export to PDF (default mode)')
+                    .setTitle('Print-Ready PDF: export (default mode)')
                     .setIcon('file-down')
                     .onClick(() => this.exportFile(file, this.settings.defaultMode)));
                 menu.addItem(item => item
-                    .setTitle('Export to PDF (print optimized)')
+                    .setTitle('Print-Ready PDF: export (print optimized)')
                     .setIcon('printer')
                     .onClick(() => this.exportFile(file, 'print')));
                 menu.addItem(item => item
-                    .setTitle('Export to PDF (preserve formatting)')
+                    .setTitle('Print-Ready PDF: export (preserve formatting)')
                     .setIcon('file-text')
                     .onClick(() => this.exportFile(file, 'preserve')));
             })
@@ -88,16 +90,34 @@ export default class PDFMakePlugin extends Plugin {
         await this.exportFile(file, mode);
     }
 
+    /** Prefer the live editor buffer (unsaved edits) over the file on disk. */
+    private async readContent(file: TFile): Promise<string> {
+        for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+            const view = leaf.view;
+            if (view instanceof MarkdownView && view.file?.path === file.path) {
+                return view.editor?.getValue() ?? view.getViewData();
+            }
+        }
+        return this.app.vault.read(file);
+    }
+
     private async exportFile(file: TFile, mode: ExportMode): Promise<void> {
+        if (this.exporting) {
+            new Notice('A PDF export is already running');
+            return;
+        }
+        this.exporting = true;
+        const progress = new ExportProgress();
         try {
-            new Notice('Generating PDF…');
-            const content = await this.app.vault.read(file);
-            const nodes = parseMarkdown(content, this.settings.pageBreakSyntax);
+            const content = await this.readContent(file);
             const exporter = new PDFExporter(this.app, this.settings);
-            await exporter.exportNote(nodes, file, mode);
+            await exporter.exportNote(content, file, mode, progress);
         } catch (err: any) {
             console.error('[Print-Ready PDF]', err);
             new Notice(`PDF export failed: ${err?.message ?? err}`);
+        } finally {
+            progress.hide();
+            this.exporting = false;
         }
     }
 

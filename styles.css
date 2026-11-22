@@ -41,3 +41,5 @@
 .pdfmake-info-box li {
     margin: 0.25em 0;
 }
+
+.pdfmake-font-input { width: 280px; max-width: 100%; }

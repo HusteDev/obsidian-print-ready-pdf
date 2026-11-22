@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type PDFMakePlugin from './main';
 import type { PDFMakeSettings } from './types';
+import { FONT_EXTENSIONS } from './fallbackFonts';
 
 export class PDFMakeSettingTab extends PluginSettingTab {
     constructor(app: App, private plugin: PDFMakePlugin) {
@@ -115,6 +116,57 @@ export class PDFMakeSettingTab extends PluginSettingTab {
                 })
             );
 
+        // ── Fonts ────────────────────────────────────────────────────────────
+
+        new Setting(containerEl).setName('Fallback fonts').setHeading();
+        containerEl.createEl('p', {
+            text: 'The built-in fonts only cover Western European characters. To export CJK, Cyrillic, Greek, symbols or emoji, add font files (.ttf, .otf, .ttc, .woff, .woff2). Each character uses the first font in this list that has it. Fonts are read only when a note needs them. Nothing is bundled. Use a vault path, or on desktop an absolute path. Large fonts (CJK) use a lot of memory on mobile; prefer a regional subset.',
+            cls: 'setting-item-description',
+        });
+
+        const listId = 'print-ready-pdf-font-list';
+        const dl = containerEl.createEl('datalist', { attr: { id: listId } });
+        for (const f of this.app.vault.getFiles()) {
+            if (FONT_EXTENSIONS.includes(f.extension.toLowerCase())) dl.createEl('option', { value: f.path });
+        }
+
+        const fonts = this.plugin.settings.fallbackFonts;
+        const save = async (list: string[]) => {
+            this.plugin.settings.fallbackFonts = list;
+            await this.plugin.saveSettings();
+        };
+        fonts.forEach((path, i) => {
+            new Setting(containerEl)
+                .setName(`Fallback font ${i + 1}`)
+                .addText(t => {
+                    t.setPlaceholder('Fonts/NotoSansCJK-Regular.ttc')
+                        .setValue(path)
+                        .onChange(async v => {
+                            const list = [...this.plugin.settings.fallbackFonts];
+                            list[i] = v.trim();
+                            await save(list);
+                        });
+                    t.inputEl.setAttr('list', listId);
+                    t.inputEl.addClass('pdfmake-font-input');
+                })
+                .addExtraButton(b => b
+                    .setIcon('trash')
+                    .setTooltip('Remove')
+                    .onClick(async () => {
+                        await save(this.plugin.settings.fallbackFonts.filter((_, j) => j !== i));
+                        this.display();
+                    })
+                );
+        });
+        new Setting(containerEl)
+            .addButton(b => b
+                .setButtonText('Add fallback font')
+                .onClick(async () => {
+                    await save([...this.plugin.settings.fallbackFonts, '']);
+                    this.display();
+                })
+            );
+
         // ── Page Breaks ──────────────────────────────────────────────────────
 
         new Setting(containerEl).setName('Page breaks').setHeading();
@@ -139,10 +191,12 @@ export class PDFMakeSettingTab extends PluginSettingTab {
         const info = containerEl.createDiv({ cls: 'pdfmake-info-box' });
         info.createEl('p', { text: 'Insert a page break anywhere in your note using either:' });
         const ul = info.createEl('ul');
-        ul.createEl('li').createEl('code', { text: '===' });
+        const li1 = ul.createEl('li');
+        li1.createEl('code', { text: '===' });
+        li1.appendText(' — shown as a "— Page Break —" marker in reading view');
         const li2 = ul.createEl('li');
         li2.createEl('code', { text: '> [!page-break]' });
-        li2.appendText(' — rendered as an Obsidian callout with a visual hint in preview');
+        li2.appendText(' — renders as an ordinary callout in Obsidian (no page-break marker); the break happens only in the exported PDF');
 
         // ── Export ───────────────────────────────────────────────────────────
 
@@ -154,11 +208,22 @@ export class PDFMakeSettingTab extends PluginSettingTab {
             .addDropdown(d => d
                 .addOptions({
                     print:    'Print optimized: clean, black and white',
-                    preserve: 'Preserve formatting: dark, approximates the Obsidian default theme',
+                    preserve: 'Preserve formatting: keeps Obsidian styling (callout colors, highlights, heading sizes) on a white page',
                 })
                 .setValue(this.plugin.settings.defaultMode)
                 .onChange(async v => {
                     this.plugin.settings.defaultMode = v as PDFMakeSettings['defaultMode'];
+                    await this.plugin.saveSettings();
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('Dark page in preserve mode')
+            .setDesc('Off by default. Renders preserve-formatting exports with a dark page and light text, like Obsidian\'s dark theme. Uses a lot of ink; not recommended for printing.')
+            .addToggle(t => t
+                .setValue(this.plugin.settings.preserveDarkPage)
+                .onChange(async v => {
+                    this.plugin.settings.preserveDarkPage = v;
                     await this.plugin.saveSettings();
                 })
             );

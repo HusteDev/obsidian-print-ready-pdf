@@ -1,16 +1,32 @@
 import { App, Notice, TFile, normalizePath } from 'obsidian';
-import { ContentNode, InlineSpan, ListNode, ImageNode, PDFMakeSettings, ExportMode } from './types';
+import {
+    Align, CalloutNode, ContentNode, ExportMode, ImageNode, InlineSpan, ListNode, PDFMakeSettings,
+    TableNode,
+} from './types';
+import { DomExtractor, walkNodes } from './domExtractor';
+import { ImageLoader } from './images';
+import { renderNote } from './noteRenderer';
+import { ExportProgress, yieldToUI } from './progress';
+import { applyFallbackFonts, FallbackResult } from './fallbackFonts';
 
 // pdfmake and its font data are large; load them only when an export runs so
 // they don't slow down Obsidian (especially mobile) startup.
 //
 // pdfmake 0.2's getBuffer() has no error callback: a failure inside its
 // font/layout promise chain becomes an unhandled rejection and the callback
-// simply never fires. Catch those while a render is running, and give up after
-// a timeout, so the user gets an error notice instead of silence.
+// simply never fires. While a render runs we listen for unhandled rejections,
+// but claim ONLY those that originate in pdfmake/pdfkit/this plugin; other
+// plugins' errors are left alone and cannot abort the export. A timeout covers
+// failures that carry no recognisable stack.
 const RENDER_TIMEOUT_MS = 60_000;
+const OWN_ERROR_RE = /pdfmake|pdfkit|fontkit|print-ready-pdf/i;
 
-async function renderPdf(docDef: any): Promise<Uint8Array> {
+function isOurRejection(reason: unknown): boolean {
+    const stack = reason instanceof Error ? `${reason.stack ?? ''} ${reason.message}` : String(reason);
+    return OWN_ERROR_RE.test(stack);
+}
+
+async function renderPdf(docDef: any, extra?: FallbackResult | null): Promise<Uint8Array> {
     const [{ default: pdfMake }, { FONTS, FONT_VFS }] = await Promise.all([
         import('pdfmake/build/pdfmake'),
         import('./fonts'),
@@ -25,6 +41,7 @@ async function renderPdf(docDef: any): Promise<Uint8Array> {
             fn();
         };
         const onRejection = (ev: PromiseRejectionEvent) => {
+            if (!isOurRejection(ev.reason)) return;
             ev.preventDefault();
             const reason = ev.reason;
             finish(() => reject(reason instanceof Error ? reason : new Error(String(reason))));
@@ -37,46 +54,12 @@ async function renderPdf(docDef: any): Promise<Uint8Array> {
 
         try {
             (pdfMake as any)
-                .createPdf(docDef, null, FONTS, FONT_VFS)
+                .createPdf(docDef, null, { ...FONTS, ...(extra?.fonts ?? {}) }, { ...FONT_VFS, ...(extra?.vfs ?? {}) })
                 .getBuffer((buffer: Uint8Array) => finish(() => resolve(buffer)));
         } catch (err) {
             finish(() => reject(err));
         }
     });
-}
-
-// ── Image helpers ─────────────────────────────────────────────────────────────
-
-function sniffImage(b: Uint8Array): { mime: string; width?: number; height?: number } | null {
-    // PNG: signature, then IHDR with big-endian width/height at bytes 16..24.
-    if (b.length > 24 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
-        const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
-        return { mime: 'image/png', width: dv.getUint32(16), height: dv.getUint32(20) };
-    }
-    // JPEG: walk segments to the first start-of-frame marker.
-    if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) {
-        let pos = 2;
-        while (pos + 9 < b.length) {
-            if (b[pos] !== 0xff) { pos++; continue; }
-            const marker = b[pos + 1];
-            if (marker === 0xff) { pos++; continue; }
-            if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-                return { mime: 'image/jpeg', height: (b[pos + 5] << 8) | b[pos + 6], width: (b[pos + 7] << 8) | b[pos + 8] };
-            }
-            pos += 2 + ((b[pos + 2] << 8) | b[pos + 3]);
-        }
-        return { mime: 'image/jpeg' };
-    }
-    return null;
-}
-
-function toBase64(bytes: Uint8Array): string {
-    let bin = '';
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
-    }
-    return btoa(bin);
 }
 
 // ── Style definitions ─────────────────────────────────────────────────────────
@@ -94,7 +77,22 @@ const PRINT_STYLES = {
     pageFooter: { fontSize: 9, color: '#777777', alignment: 'center' as const },
 };
 
-const PRESERVE_STYLES = {
+// Preserve formatting on a white page: Obsidian-like heading sizes and accent
+// colours, but dark text on white so it prints normally.
+const PRESERVE_LIGHT_STYLES = {
+    h1: { fontSize: 26, bold: true, color: '#111111', marginTop: 16, marginBottom: 8 },
+    h2: { fontSize: 22, bold: true, color: '#111111', marginTop: 14, marginBottom: 7 },
+    h3: { fontSize: 19, bold: true, color: '#111111', marginTop: 12, marginBottom: 6 },
+    h4: { fontSize: 16, bold: true, color: '#111111', marginTop: 10, marginBottom: 5 },
+    h5: { fontSize: 14, bold: true, color: '#111111', marginTop: 8,  marginBottom: 4 },
+    h6: { fontSize: 12, bold: true, italics: true, color: '#111111', marginTop: 6, marginBottom: 3 },
+    blockquote: { italics: true, color: '#555555', marginLeft: 20, marginTop: 4, marginBottom: 4 },
+    calloutTitle: { bold: true, fontSize: 13, marginBottom: 4 },
+    tableHeader: { bold: true, color: '#1d4ed8' },
+    pageFooter: { fontSize: 9, color: '#777777', alignment: 'center' as const },
+};
+
+const PRESERVE_DARK_STYLES = {
     h1: { fontSize: 26, bold: true, color: '#dcddde', marginTop: 16, marginBottom: 8 },
     h2: { fontSize: 22, bold: true, color: '#dcddde', marginTop: 14, marginBottom: 7 },
     h3: { fontSize: 19, bold: true, color: '#dcddde', marginTop: 12, marginBottom: 6 },
@@ -123,6 +121,13 @@ const CALLOUT_COLORS: Record<string, string> = {
     bug: '#ef4444',
 };
 
+
+// Aliases Obsidian ships that the base palette above lacks (used only when the
+// theme's own --callout-color could not be read).
+const CALLOUT_ALIASES: Record<string, string> = {
+    attention: 'warning', failure: 'danger', fail: 'danger', missing: 'danger',
+};
+
 // ── Layout geometry ───────────────────────────────────────────────────────────
 
 // Portrait [width, height] in points, as pdfmake defines them.
@@ -139,49 +144,104 @@ const PAGE_DIMENSIONS: Record<string, [number, number]> = {
 const COURIER_ADVANCE_EM = 0.6;
 // Obsidian's default tab width; pdfkit has no tab stops, so expand tabs first.
 const TAB_SPACES = '    ';
+// Code blocks are split into rows of this many lines so long blocks can break across pages.
+const CODE_ROW_LINES = 25;
 
 // Horizontal space a code block's frame consumes around the text:
 // cell text margin (8 + 8) + pdfmake's default cell padding (4 + 4) + borders (0.5 + 0.5).
 const CODE_BLOCK_CHROME = 8 + 8 + 4 + 4 + 0.5 + 0.5;
-// Callout frame: accent column (4) + inner margin (8 + 8).
-const CALLOUT_CHROME = 4 + 8 + 8;
-// Blockquote left indent from its style.
-const BLOCKQUOTE_INDENT = 20;
+// Callout frame: accent column (4) + inner margins (10 + 8).
+const CALLOUT_CHROME = 4 + 10 + 8;
+// Blockquote frame: bar (3) + inner margins (10 + 0).
+const QUOTE_CHROME = 3 + 10;
+// Bullet/number gutter pdfmake reserves for list markers.
+const LIST_INDENT = 20;
+
+/** Rendering context threaded through node conversion. */
+interface RC {
+    mode: ExportMode;
+    fontSize: number;
+    availWidth: number;
+    /** Inside a list item or table cell: tighter paragraph spacing. */
+    tight?: boolean;
+}
+
+const asArray = (v: any): any[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+
+function hexToRgb(hex: string): [number, number, number] | null {
+    const m = hex.match(/^#([0-9a-f]{6})$/i);
+    if (!m) return null;
+    const n = parseInt(m[1], 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** Blend `color` over `base` at `alpha` (what a translucent callout background looks like). */
+function mixHex(color: string, base: string, alpha: number): string {
+    const c = hexToRgb(color);
+    const b = hexToRgb(base);
+    if (!c || !b) return base;
+    const h = (i: number) => Math.round(c[i] * alpha + b[i] * (1 - alpha)).toString(16).padStart(2, '0');
+    return `#${h(0)}${h(1)}${h(2)}`;
+}
 
 // ── Exporter class ────────────────────────────────────────────────────────────
 
 export class PDFExporter {
+    private images: ImageLoader;
+
     constructor(
         private app: App,
         private settings: PDFMakeSettings,
-    ) {}
+    ) {
+        this.images = new ImageLoader(app);
+    }
 
-    async exportNote(nodes: ContentNode[], file: TFile, mode: ExportMode): Promise<void> {
-        await this.resolveImages(nodes, file.path);
+    async exportNote(markdown: string, file: TFile, mode: ExportMode, progress?: ExportProgress): Promise<void> {
+        await progress?.set('Rendering note…');
+        const rendered = await renderNote(this.app, markdown, file.path, this.contentWidth() * 96 / 72);
+        let nodes: ContentNode[];
+        try {
+            nodes = new DomExtractor({ pageBreakSyntax: this.settings.pageBreakSyntax }).extract(rendered.el);
+        } finally {
+            rendered.dispose();
+        }
+        await this.resolveImages(nodes, file.path, progress);
 
+        await progress?.set('Building PDF… (the app may pause briefly)');
         let buffer: Uint8Array;
         try {
-            buffer = await renderPdf(this.buildDocDef(nodes, mode));
+            buffer = await this.render(nodes, mode);
         } catch (err) {
             if (!this.hasEmbeddedImages(nodes)) throw err;
-            // An image pdfkit can't decode (e.g. interlaced PNG) aborts the whole
-            // render; retry with placeholders instead of failing the export.
+            // An image pdfkit can't decode aborts the whole render; retry with
+            // placeholders instead of failing the export.
             console.warn('[Print-Ready PDF] Render failed with images, retrying without them', err);
             this.stripImages(nodes);
             new Notice('An image could not be embedded; exporting with placeholders.');
-            buffer = await renderPdf(this.buildDocDef(nodes, mode));
+            await yieldToUI();
+            buffer = await this.render(nodes, mode);
         }
+        await progress?.set('Saving PDF…');
         await this.saveBuffer(buffer, file, mode);
     }
 
+    private async render(nodes: ContentNode[], mode: ExportMode): Promise<Uint8Array> {
+        const docDef = this.buildDocDef(nodes, mode);
+        const fallback = await applyFallbackFonts(this.app, docDef, this.settings.fallbackFonts);
+        if (fallback?.warnings.length) {
+            for (const w of fallback.warnings) console.warn('[Print-Ready PDF]', w);
+            new Notice(fallback.warnings.join('\n'), 10000);
+        }
+        return renderPdf(docDef, fallback);
+    }
+
     private buildDocDef(nodes: ContentNode[], mode: ExportMode): any {
-        const styles = mode === 'print' ? PRINT_STYLES : PRESERVE_STYLES;
-        const defaultColor = mode === 'print' ? '#111111' : '#dcddde';
+        const dark = this.isDark(mode);
+        const styles = dark ? PRESERVE_DARK_STYLES : mode === 'preserve' ? PRESERVE_LIGHT_STYLES : PRINT_STYLES;
+        const defaultColor = dark ? '#dcddde' : '#111111';
         const { marginTop, marginRight, marginBottom, marginLeft, baseFontSize } = this.settings;
 
-        const content: any[] = nodes
-            .map(n => this.nodeToContent(n, styles, mode, baseFontSize, this.contentWidth()))
-            .filter(Boolean);
+        const content = this.blocksToContent(nodes, { mode, fontSize: baseFontSize, availWidth: this.contentWidth() });
 
         return {
             content,
@@ -195,7 +255,7 @@ export class PDFExporter {
             pageSize: this.settings.pageSize,
             pageOrientation: this.settings.pageOrientation,
             pageMargins: [marginLeft, marginTop, marginRight, marginBottom],
-            ...(mode === 'preserve' ? {
+            ...(dark ? {
                 background: (_page: number, pageSize: any) => ({
                     canvas: [{
                         type: 'rect',
@@ -214,6 +274,11 @@ export class PDFExporter {
                 }),
             } : {}),
         };
+    }
+
+    /** Only Preserve mode with the explicit dark-page opt-in renders a dark page. */
+    private isDark(mode: ExportMode): boolean {
+        return mode === 'preserve' && this.settings.preserveDarkPage;
     }
 
     // ── Output ───────────────────────────────────────────────────────────────
@@ -245,99 +310,74 @@ export class PDFExporter {
             outputPath = normalizePath(`${prefix}${stem} (${n}).pdf`);
         }
 
-        const data = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+        // Avoid duplicating a multi-MB PDF in memory when the view already spans the whole buffer.
+        const data = (buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength
+            ? buffer.buffer
+            : buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)) as ArrayBuffer;
         await vault.createBinary(outputPath, data);
         new Notice(`PDF saved → ${outputPath}`);
     }
 
     // ── Images ───────────────────────────────────────────────────────────────
 
-    private forEachImage(nodes: ContentNode[], fn: (img: ImageNode) => void): void {
-        for (const n of nodes) {
-            if (n.type === 'image') fn(n);
-            else if (n.type === 'blockquote' || n.type === 'callout') this.forEachImage(n.content, fn);
-        }
-    }
-
-    private hasEmbeddedImages(nodes: ContentNode[]): boolean {
-        let found = false;
-        this.forEachImage(nodes, img => { if (img.dataUrl) found = true; });
+    private collectImages(nodes: ContentNode[]): ImageNode[] {
+        const found: ImageNode[] = [];
+        walkNodes(nodes, n => { if (n.type === 'image') found.push(n); });
         return found;
     }
 
+    private hasEmbeddedImages(nodes: ContentNode[]): boolean {
+        return this.collectImages(nodes).some(i => i.dataUrl);
+    }
+
     private stripImages(nodes: ContentNode[]): void {
-        this.forEachImage(nodes, img => {
+        for (const img of this.collectImages(nodes)) {
             if (img.dataUrl) {
                 delete img.dataUrl;
                 img.unresolvedReason = 'could not be embedded';
             }
-        });
-    }
-
-    private async resolveImages(nodes: ContentNode[], sourcePath: string): Promise<void> {
-        const images: ImageNode[] = [];
-        this.forEachImage(nodes, img => images.push(img));
-        for (const img of images) {
-            try {
-                await this.loadImage(img, sourcePath);
-            } catch (err) {
-                console.warn('[Print-Ready PDF] Failed to read image', img.src, err);
-                img.unresolvedReason = 'could not be read';
-            }
         }
     }
 
-    private async loadImage(img: ImageNode, sourcePath: string): Promise<void> {
-        if (/^[a-z][a-z0-9+.-]*:/i.test(img.src)) {
-            img.unresolvedReason = 'external images are not embedded';
-            return;
+    private async resolveImages(nodes: ContentNode[], sourcePath: string, progress?: ExportProgress): Promise<void> {
+        const images = this.collectImages(nodes);
+        for (let i = 0; i < images.length; i++) {
+            await progress?.set(`Loading images (${i + 1}/${images.length})…`);
+            await this.images.load(images[i], sourcePath);
+            // Decoding and re-encoding are synchronous; free the thread between images.
+            await yieldToUI();
         }
-        const linkPath = img.src.split('#')[0];
-        const sourceFolder = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : '';
-        let file: unknown = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
-        if (!(file instanceof TFile)) {
-            file = this.app.vault.getAbstractFileByPath(normalizePath(`${sourceFolder}/${linkPath}`));
-        }
-        if (!(file instanceof TFile)) {
-            img.unresolvedReason = 'not found';
-            return;
-        }
-        if (file.extension.toLowerCase() === 'md') {
-            img.unresolvedReason = 'embedded notes are not supported';
-            return;
-        }
-        const bytes = new Uint8Array(await this.app.vault.readBinary(file));
-        const info = sniffImage(bytes);
-        if (!info) {
-            img.unresolvedReason = `${file.extension.toUpperCase()} images are not supported (PNG and JPEG only)`;
-            return;
-        }
-        img.dataUrl = `data:${info.mime};base64,${toBase64(bytes)}`;
-        img.naturalWidth = info.width;
-        img.naturalHeight = info.height;
     }
 
-    private imageToContent(node: ImageNode, mode: ExportMode, availWidth: number): any {
+    private imageToContent(node: ImageNode, rc: RC): any {
         if (!node.dataUrl) {
             return {
-                text: `[Image not embedded: ${node.alt || node.src}${node.unresolvedReason ? ` (${node.unresolvedReason})` : ''}]`,
+                text: `[Image not embedded: ${node.alt || node.src || 'image'}${node.unresolvedReason ? ` (${node.unresolvedReason})` : ''}]`,
                 italics: true,
-                color: mode === 'print' ? '#999999' : '#666666',
+                color: !this.isDark(rc.mode) ? '#999999' : '#666666',
                 marginBottom: 4,
+                alignment: node.align,
             };
         }
         const [pw, ph] = PAGE_DIMENSIONS[this.settings.pageSize] ?? PAGE_DIMENSIONS.LETTER;
         const pageHeight = this.settings.pageOrientation === 'landscape' ? pw : ph;
         const maxHeight = pageHeight - this.settings.marginTop - this.settings.marginBottom - 24;
+        const avail = Math.max(10, rc.availWidth);
+        const base = { image: node.dataUrl, marginBottom: 6, alignment: node.align };
 
         const { naturalWidth: nw, naturalHeight: nh } = node;
-        if (!nw || !nh) {
-            return { image: node.dataUrl, fit: [availWidth, maxHeight], marginBottom: 6 };
-        }
         // Obsidian sizes are CSS pixels; PDF points are 0.75 px.
-        const wantedWidth = (node.width ?? nw) * 0.75;
-        const scale = Math.min(1, availWidth / wantedWidth, maxHeight / (wantedWidth * nh / nw));
-        return { image: node.dataUrl, width: wantedWidth * scale, marginBottom: 6 };
+        let w: number | undefined = node.widthPct ? avail * node.widthPct / 100
+            : node.width !== undefined ? node.width * 0.75
+            : nw ? nw * 0.75 : undefined;
+        let h: number | undefined = node.height !== undefined ? node.height * 0.75 : undefined;
+        if (w === undefined && h !== undefined && nw && nh) w = h * nw / nh;
+        if (w === undefined) return { ...base, fit: [avail, maxHeight] };
+        if (h === undefined) h = nw && nh ? w * nh / nw : undefined;
+        if (h === undefined) return { ...base, fit: [avail, maxHeight] };
+
+        const scale = Math.min(1, avail / w, maxHeight / h);
+        return { ...base, width: w * scale, height: h * scale };
     }
 
     // ── Geometry helpers ─────────────────────────────────────────────────────
@@ -372,44 +412,96 @@ export class PDFExporter {
 
     // ── Node → pdfmake content ───────────────────────────────────────────────
 
-    private nodeToContent(node: ContentNode, styles: any, mode: ExportMode, fontSize: number, availWidth: number): any {
+    private blocksToContent(nodes: ContentNode[], rc: RC): any[] {
+        const out: any[] = [];
+        for (const n of nodes) out.push(...asArray(this.nodeToContent(n, rc)));
+        return out;
+    }
+
+    /** A row-based accent frame (callouts, blockquotes): one row per block so it can split across pages. */
+    private framedRows(rows: { content: any; margin: number[] }[], accent: string, barWidth: number, fill: string | null): any {
+        return {
+            table: {
+                widths: [barWidth, '*'],
+                body: rows.map(r => [
+                    { text: '', border: [false, false, false, false] },
+                    { stack: asArray(r.content), margin: r.margin },
+                ]),
+            },
+            layout: {
+                fillColor: (_row: number, _node: any, col: number) => (col === 0 ? accent : fill),
+                hLineWidth: () => 0,
+                vLineWidth: () => 0,
+                paddingLeft: () => 0,
+                paddingRight: () => 0,
+                paddingTop: () => 0,
+                paddingBottom: () => 0,
+            },
+            marginBottom: 8,
+            marginTop: 4,
+        };
+    }
+
+    private nodeToContent(node: ContentNode, rc: RC): any {
+        const { mode, fontSize, availWidth } = rc;
         switch (node.type) {
             case 'heading':
                 return {
-                    text: this.spansToInline(node.content, mode, fontSize),
+                    text: this.spansToInline(node.content, rc),
                     style: `h${node.level}`,
                     tocItem: node.level <= 3,
+                    alignment: node.align,
+                    ...(node.id ? { id: node.id } : {}),
                 };
 
             case 'paragraph':
                 return {
-                    text: this.spansToInline(node.content, mode, fontSize),
+                    text: this.spansToInline(node.content, rc),
+                    marginBottom: rc.tight ? 2 : 6,
+                    alignment: node.align,
+                };
+
+            case 'placeholder':
+                return {
+                    text: node.text,
+                    italics: true,
+                    color: !this.isDark(mode) ? '#888888' : '#777777',
                     marginBottom: 6,
                 };
 
             case 'code_block': {
-                const codeColor  = mode === 'print' ? '#1a1a1a' : '#abb2bf';
-                const codeBg     = mode === 'print' ? '#f7f7f7' : '#282c34';
-                const borderCol  = mode === 'print' ? '#dddddd' : '#3e4451';
+                const codeColor  = !this.isDark(mode) ? '#1a1a1a' : '#abb2bf';
+                const codeBg     = !this.isDark(mode) ? '#f7f7f7' : '#282c34';
+                const borderCol  = !this.isDark(mode) ? '#dddddd' : '#3e4451';
                 const code       = node.code.replace(/\t/g, TAB_SPACES);
+                const size       = this.codeFontSize(code, fontSize, availWidth);
+                // Courier is fixed-width, so a line that cannot fit can be wrapped exactly.
+                const maxCols    = Math.max(4, Math.floor((availWidth - CODE_BLOCK_CHROME - 0.5) / (size * COURIER_ADVANCE_EM)));
+                const lines      = code.split('\n').map(l =>
+                    new RegExp(`\\S{${maxCols + 1},}`).test(l) ? chunkString(l, maxCols).join('\n') : l);
+                const chunks: string[] = [];
+                for (let i = 0; i < lines.length; i += CODE_ROW_LINES) {
+                    chunks.push(lines.slice(i, i + CODE_ROW_LINES).join('\n'));
+                }
+                const body = chunks.map((text, i) => [{
+                    text: text === '' ? ' ' : text,
+                    font: 'Courier',
+                    fontSize: size,
+                    color: codeColor,
+                    margin: [8, i === 0 ? 6 : 0, 8, i === chunks.length - 1 ? 6 : 0],
+                    preserveLeadingSpaces: true,
+                }]);
                 return {
-                    table: {
-                        widths: ['*'],
-                        body: [[{
-                            text: code,
-                            font: 'Courier',
-                            fontSize: this.codeFontSize(code, fontSize, availWidth),
-                            color: codeColor,
-                            margin: [8, 6, 8, 6],
-                            preserveLeadingSpaces: true,
-                        }]],
-                    },
+                    table: { widths: ['*'], body },
                     layout: {
                         fillColor: () => codeBg,
-                        hLineWidth: () => 0.5,
+                        // Rules only around the whole block, not between row chunks.
+                        hLineWidth: (i: number, n: any) => (i === 0 || i === n.table.body.length ? 0.5 : 0),
                         vLineWidth: () => 0.5,
                         hLineColor: () => borderCol,
                         vLineColor: () => borderCol,
+                        paddingTop: (i: number) => (i === 0 ? 4 : 0),
+                        paddingBottom: (i: number, n: any) => (i === n.table.body.length - 1 ? 4 : 0),
                     },
                     marginBottom: 8,
                     marginTop: 2,
@@ -417,92 +509,28 @@ export class PDFExporter {
             }
 
             case 'list':
-                return this.listToContent(node, mode, fontSize, 6);
+                return this.listToContent(node, rc, rc.tight ? 2 : 6);
 
             case 'blockquote': {
-                const inner = node.content
-                    .map(n => this.nodeToContent(n, styles, mode, fontSize, availWidth - BLOCKQUOTE_INDENT))
-                    .filter(Boolean);
-                return { stack: inner, style: 'blockquote', margin: [0, 4, 0, 4] };
+                const inner = { ...rc, availWidth: availWidth - QUOTE_CHROME, tight: false };
+                const bar = !this.isDark(mode) ? '#c4c4c4' : '#555555';
+                const rows = this.blocksToContent(node.content, inner)
+                    .map(content => ({ content, margin: [10, 0, 0, 0] }));
+                if (!rows.length) return null;
+                return this.framedRows(rows, bar, 3, null);
             }
 
-            case 'callout': {
-                const accent  = CALLOUT_COLORS[node.calloutType] ?? '#6366f1';
-                const bodyBg  = mode === 'print' ? '#f9f9f9' : '#252526';
-                const inner   = node.content
-                    .map(n => this.nodeToContent(n, styles, mode, fontSize, availWidth - CALLOUT_CHROME))
-                    .filter(Boolean);
+            case 'callout':
+                return this.calloutToContent(node, rc);
 
-                return {
-                    table: {
-                        widths: [4, '*'],
-                        body: [[
-                            { text: '', border: [false, false, false, false] },
-                            {
-                                stack: [
-                                    { text: node.title, style: 'calloutTitle', color: accent },
-                                    ...inner,
-                                ],
-                                margin: [8, 6, 8, 6],
-                            },
-                        ]],
-                    },
-                    layout: {
-                        fillColor: (_row: number, _node: any, col: number) =>
-                            col === 0 ? accent : bodyBg,
-                        hLineWidth: () => 0,
-                        vLineWidth: () => 0,
-                        paddingLeft: () => 0,
-                        paddingRight: () => 0,
-                        paddingTop: () => 0,
-                        paddingBottom: () => 0,
-                    },
-                    marginBottom: 8,
-                    marginTop: 4,
-                };
-            }
-
-            case 'table': {
-                const headerBg = mode === 'print' ? '#eeeeee' : '#2d333b';
-                const borderCol = mode === 'print' ? '#cccccc' : '#444c56';
-
-                const cols = Math.max(node.headers.length, ...node.rows.map(r => r.length));
-                const pad = (row: InlineSpan[][]) => [...row, ...Array.from({ length: cols - row.length }, () => [] as InlineSpan[])];
-
-                const headerRow = pad(node.headers).map(cell => ({
-                    text: this.spansToInline(cell, mode, fontSize),
-                    style: 'tableHeader',
-                    fillColor: headerBg,
-                    margin: [4, 4, 4, 4],
-                }));
-
-                const dataRows = node.rows.map(row =>
-                    pad(row).map(cell => ({
-                        text: this.spansToInline(cell, mode, fontSize),
-                        margin: [4, 3, 4, 3],
-                    }))
-                );
-
-                return {
-                    table: {
-                        headerRows: 1,
-                        widths: Array(cols).fill('*'),
-                        body: [headerRow, ...dataRows],
-                    },
-                    layout: {
-                        hLineColor: () => borderCol,
-                        vLineColor: () => borderCol,
-                    },
-                    marginBottom: 8,
-                    marginTop: 4,
-                };
-            }
+            case 'table':
+                return this.tableToContent(node, rc);
 
             case 'page_break':
                 return { text: '', pageBreak: 'before' };
 
             case 'horizontal_rule': {
-                const lineColor = mode === 'print' ? '#cccccc' : '#444444';
+                const lineColor = !this.isDark(mode) ? '#cccccc' : '#444444';
                 return {
                     canvas: [{
                         type: 'line',
@@ -516,26 +544,129 @@ export class PDFExporter {
             }
 
             case 'image':
-                return this.imageToContent(node, mode, availWidth);
+                return this.imageToContent(node, rc);
 
             default:
                 return null;
         }
     }
 
-    private listToContent(list: ListNode, mode: ExportMode, fontSize: number, marginBottom: number): any {
+    private calloutToContent(node: CalloutNode, rc: RC): any[] {
+        const dark = this.isDark(rc.mode);
+        const type = CALLOUT_ALIASES[node.calloutType] ?? node.calloutType;
+        // Print mode is greyscale: no hue anywhere, so it reproduces on a mono printer.
+        const bw = rc.mode === 'print';
+        const accent = bw ? '#555555' : (node.color ?? CALLOUT_COLORS[type] ?? '#6366f1');
+        const bodyBg = bw ? '#f4f4f4' : mixHex(accent, dark ? '#1e1e1e' : '#ffffff', dark ? 0.12 : 0.1);
+        const inner: RC = { ...rc, availWidth: rc.availWidth - CALLOUT_CHROME, tight: false };
+
+        // A page break inside a callout splits it into separate frames.
+        const segments: ContentNode[][] = [[]];
+        for (const child of node.content) {
+            if (child.type === 'page_break') segments.push([]);
+            else segments[segments.length - 1].push(child);
+        }
+
+        const out: any[] = [];
+        segments.forEach((segment, si) => {
+            const rows: { content: any; margin: number[] }[] = [];
+            if (si === 0) {
+                rows.push({
+                    content: { text: this.spansToInline(node.title, inner), style: 'calloutTitle', color: bw ? undefined : accent },
+                    margin: [10, 6, 8, segment.length ? 2 : 6],
+                });
+            }
+            segment.forEach(child => {
+                for (const c of asArray(this.nodeToContent(child, inner))) {
+                    rows.push({ content: c, margin: [10, 2, 8, 2] });
+                }
+            });
+            if (!rows.length) return;
+            const last = rows[rows.length - 1];
+            if (si > 0 || rows.length > 1) last.margin = [10, last.margin[1], 8, 6];
+            if (si > 0) out.push({ text: '', pageBreak: 'before' });
+            out.push(this.framedRows(rows, accent, 4, bodyBg));
+        });
+        return out;
+    }
+
+    private tableToContent(node: TableNode, rc: RC): any {
+        const { mode, fontSize } = rc;
+        const headerBg = !this.isDark(mode) ? '#eeeeee' : '#2d333b';
+        const borderCol = !this.isDark(mode) ? '#cccccc' : '#444c56';
+
+        // Lay cells on a grid so colSpan/rowSpan placeholders line up.
+        const grid: any[][] = [];
+        node.rows.forEach((row, r) => {
+            grid[r] = grid[r] ?? [];
+            let c = 0;
+            for (const cell of row) {
+                while (grid[r][c] !== undefined) c++;
+                const rowSpan = Math.min(cell.rowSpan, node.rows.length - r);
+                grid[r][c] = { cell, colSpan: cell.colSpan, rowSpan };
+                for (let dr = 0; dr < rowSpan; dr++) {
+                    grid[r + dr] = grid[r + dr] ?? [];
+                    for (let dc = 0; dc < cell.colSpan; dc++) {
+                        if (dr || dc) grid[r + dr][c + dc] = { placeholder: true };
+                    }
+                }
+                c += cell.colSpan;
+            }
+        });
+        const cols = Math.max(1, ...grid.map(r => r.length));
+        const cellWidth = Math.max(40, (rc.availWidth - 8 * cols) / cols);
+        const cellRc: RC = { ...rc, availWidth: cellWidth, tight: true };
+
+        const body = grid.map((row, r) => {
+            const out: any[] = [];
+            for (let c = 0; c < cols; c++) {
+                const g = row[c];
+                if (!g) { out.push({ text: '' }); continue; }
+                if (g.placeholder) { out.push({}); continue; }
+                const cell = g.cell as TableNode['rows'][number][number];
+                const isHeader = r < node.headerRows || cell.header;
+                const nodes = this.blocksToContent(cell.content, cellRc);
+                const obj: any = nodes.length === 1 && nodes[0].text !== undefined && !nodes[0].image
+                    ? { ...nodes[0], marginBottom: 0 }
+                    : { stack: nodes.length ? nodes : [{ text: '' }] };
+                obj.margin = [4, 3, 4, 3];
+                if (cell.align && !obj.alignment) obj.alignment = cell.align as Align;
+                if (isHeader) { obj.style = 'tableHeader'; obj.fillColor = headerBg; }
+                if (g.colSpan > 1) obj.colSpan = g.colSpan;
+                if (g.rowSpan > 1) obj.rowSpan = g.rowSpan;
+                out.push(obj);
+            }
+            return out;
+        });
+
+        return {
+            table: {
+                headerRows: node.headerRows,
+                widths: Array(cols).fill('auto'),
+                body,
+            },
+            layout: {
+                hLineColor: () => borderCol,
+                vLineColor: () => borderCol,
+            },
+            marginBottom: 8,
+            marginTop: 4,
+        };
+    }
+
+    private listToContent(list: ListNode, rc: RC, marginBottom: number): any {
         const hasTasks = list.items.some(it => it.checked !== undefined);
-        const accent = mode === 'print' ? '#444444' : '#aaaaaa';
+        const accent = !this.isDark(rc.mode) ? '#444444' : '#aaaaaa';
+        const inner: RC = { ...rc, availWidth: rc.availWidth - LIST_INDENT, tight: true };
 
         const items = list.items.map((it, idx) => {
-            const text = { text: this.spansToInline(it.content, mode, fontSize) };
-            const children = it.children.map(c => this.listToContent(c, mode, fontSize, 0));
-            const body = children.length ? { stack: [text, ...children] } : text;
+            const nodes = this.blocksToContent(it.content, inner);
+            const body = nodes.length === 1 ? nodes[0] : { stack: nodes.length ? nodes : [{ text: '' }] };
             if (!hasTasks) return body;
 
             // Task lists: draw our own marker (the standard fonts have no ☐ / ☑).
             const box = it.checked === undefined
-                ? { text: list.ordered ? `${list.start + idx}.` : '\u2022', width: 14, color: accent }
+                ? { text: list.ordered ? `${list.start + idx}.` : '•', width: 14, color: accent }
                 : {
                     width: 14,
                     canvas: [
@@ -557,41 +688,83 @@ export class PDFExporter {
 
     // ── Inline spans → pdfmake text array ────────────────────────────────────
 
-    private spansToInline(spans: InlineSpan[], mode: ExportMode, fontSize: number): any {
+    private spansToInline(spans: InlineSpan[], rc: RC): any {
         if (spans.length === 0) return '';
-
-        const isPlain = (s: InlineSpan) =>
-            !s.bold && !s.italics && !s.monospace && !s.strikethrough &&
-            !s.highlight && !s.link && !s.color && !s.background;
-
-        if (spans.length === 1 && isPlain(spans[0])) return spans[0].text;
+        const { mode, fontSize, availWidth } = rc;
+        const dark = this.isDark(mode);
+        // Print mode is greyscale: author colours, pink code, yellow marks and blue links all drop out.
+        const bw = mode === 'print';
+        const page = dark ? '#1e1e1e' : '#ffffff';
 
         return spans.map(span => {
-            const obj: any = { text: span.text };
+            const size = Math.max(5, fontSize * (span.scale ?? 1));
+            const codeSize = Math.max(8, size - 2);
+            const obj: any = { text: breakLongTokens(span.text, availWidth, span.monospace ? codeSize : size, !!span.monospace) };
             if (span.bold)        obj.bold = true;
             if (span.italics)     obj.italics = true;
-            if (span.strikethrough) obj.decoration = 'lineThrough';
+            const deco: string[] = [];
+            if (span.underline) deco.push('underline');
+            if (span.strikethrough) deco.push('lineThrough');
+            if (deco.length) obj.decoration = deco.length === 1 ? deco[0] : deco;
+            if (span.scale && span.scale !== 1) obj.fontSize = size;
             if (span.monospace) {
                 obj.font      = 'Courier';
-                obj.fontSize  = Math.max(8, fontSize - 2);
-                obj.background = mode === 'print' ? '#f5f5f5' : '#282c34';
-                obj.color      = mode === 'print' ? '#c7254e' : '#e06c75';
+                obj.fontSize  = codeSize;
+                obj.background = bw ? '#eeeeee' : !dark ? '#f5f5f5' : '#282c34';
+                obj.color      = bw ? '#222222' : !dark ? '#c7254e' : '#e06c75';
             }
             if (span.highlight) {
-                obj.background = '#ffff00';
+                obj.background = bw ? '#d9d9d9' : '#ffff00';
                 obj.color      = '#000000';
             }
-            if (span.link) {
-                obj.link       = span.link;
-                obj.color      = mode === 'print' ? '#0055cc' : '#58a6ff';
-                obj.decoration = 'underline';
-            } else if (span.color) {
-                obj.color = span.color;
+            if (!bw) {
+                if (span.background && !span.monospace && !span.highlight) obj.background = span.background;
+                // Skip author colours that would vanish against the page (e.g. white on white).
+                if (span.color && hasContrast(span.color, page)) obj.color = span.color;
             }
-            if (span.background && !span.monospace && !span.highlight) {
-                obj.background = span.background;
+            if (span.linkStyle) {
+                if (!bw && !obj.color) obj.color = !dark ? '#0055cc' : '#58a6ff';
+                obj.decoration = 'underline';
+                if (span.link) obj.link = span.link;
+                else if (span.anchor) obj.linkToDestination = span.anchor;
             }
             return obj;
         });
     }
+}
+
+// ── Text helpers ──────────────────────────────────────────────────────────────
+
+function luminance(hex: string): number | null {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return null;
+    const [r, g, b] = rgb.map(v => v / 255);
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** False when `color` is too close to the page colour to be readable. */
+function hasContrast(color: string, page: string): boolean {
+    const a = luminance(color);
+    const b = luminance(page);
+    if (a === null || b === null) return true;
+    return Math.abs(a - b) > 0.25;
+}
+
+function chunkString(tok: string, size: number): string[] {
+    const chars = Array.from(tok);
+    const out: string[] = [];
+    for (let i = 0; i < chars.length; i += size) out.push(chars.slice(i, i + size).join(''));
+    return out;
+}
+
+/**
+ * pdfkit never breaks inside a word, so a URL or hash wider than its box runs
+ * past the margin. Insert hard breaks into tokens that clearly cannot fit.
+ * Proportional text is estimated (average 0.5em to trigger, 0.8em per chunk).
+ */
+function breakLongTokens(text: string, avail: number, size: number, mono: boolean): string {
+    const maxChars = Math.max(4, Math.floor((avail * 0.97) / (size * (mono ? COURIER_ADVANCE_EM : 0.8))));
+    const trigger = mono ? maxChars : Math.max(maxChars, Math.floor(avail / (size * 0.5)));
+    if (text.length <= trigger) return text;
+    return text.replace(/\S+/g, tok => (tok.length > trigger ? chunkString(tok, maxChars).join('\n') : tok));
 }
