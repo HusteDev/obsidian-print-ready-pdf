@@ -1,0 +1,27 @@
+{
+    "name": "print-ready-pdf",
+    "version": "0.1.0",
+    "description": "Print-optimized or format-preserving PDF export for Obsidian, built on pdfmake",
+    "main": "main.js",
+    "scripts": {
+        "test": "tsc -noEmit -skipLibCheck",
+        "dev": "node esbuild.config.mjs",
+        "build": "node esbuild.config.mjs production"
+    },
+    "keywords": [],
+    "author": "HusteDev",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "^16.11.6",
+        "@typescript-eslint/eslint-plugin": "5.29.0",
+        "@typescript-eslint/parser": "5.29.0",
+        "builtin-modules": "3.3.0",
+        "esbuild": "0.17.3",
+        "obsidian": "latest",
+        "tslib": "2.4.0",
+        "typescript": "4.7.4"
+    },
+    "dependencies": {
+        "pdfmake": "^0.2.10"
+    }
+}

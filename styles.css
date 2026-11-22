@@ -1,0 +1,43 @@
+/* Visual indicator in Reading/Live Preview for === page break markers */
+.pdfmake-page-break-marker {
+    display: flex;
+    align-items: center;
+    gap: 0.75em;
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 0.82em;
+    margin: 1.25em 0;
+    user-select: none;
+}
+
+.pdfmake-page-break-marker::before,
+.pdfmake-page-break-marker::after {
+    content: '';
+    flex: 1;
+    border-top: 1px dashed var(--text-muted);
+    opacity: 0.5;
+}
+
+/* Info/hint box used in the settings tab */
+.pdfmake-info-box {
+    background: var(--background-secondary);
+    border-left: 3px solid var(--interactive-accent);
+    padding: 0.5em 1em;
+    margin: 0.25em 0 1.25em 0;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.875em;
+    color: var(--text-muted);
+}
+
+.pdfmake-info-box p {
+    margin: 0.3em 0;
+}
+
+.pdfmake-info-box ul {
+    margin: 0.3em 0 0.3em 1.4em;
+    padding: 0;
+}
+
+.pdfmake-info-box li {
+    margin: 0.25em 0;
+}
