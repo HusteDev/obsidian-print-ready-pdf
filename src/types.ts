@@ -12,6 +12,7 @@ export interface PDFMakeSettings {
     marginLeft: number;
     defaultMode: ExportMode;
     preserveDarkPage: boolean;
+    printInColor: boolean;
     pageBreakSyntax: PageBreakSyntax;
     includePageNumbers: boolean;
     baseFontSize: number;
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: PDFMakeSettings = {
     marginLeft: 72,
     defaultMode: 'print',
     preserveDarkPage: false,
+    printInColor: false,
     pageBreakSyntax: 'both',
     includePageNumbers: true,
     baseFontSize: 12,

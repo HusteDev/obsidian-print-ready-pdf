@@ -241,10 +241,15 @@ export class PDFExporter {
         const defaultColor = dark ? '#dcddde' : '#111111';
         const { marginTop, marginRight, marginBottom, marginLeft, baseFontSize } = this.settings;
 
+        this.imageDict.clear();
         const content = this.blocksToContent(nodes, { mode, fontSize: baseFontSize, availWidth: this.contentWidth() });
+        // One XObject per distinct image, however many times it is used.
+        const images: Record<string, string> = {};
+        this.imageDict.forEach((key, url) => { images[key] = url; });
 
         return {
             content,
+            ...(this.imageDict.size ? { images } : {}),
             styles,
             defaultStyle: {
                 font: 'Helvetica',
@@ -277,6 +282,11 @@ export class PDFExporter {
     }
 
     /** Only Preserve mode with the explicit dark-page opt-in renders a dark page. */
+    /** Print mode renders all text in black and white unless 'print in color' is on. */
+    private isBw(mode: ExportMode): boolean {
+        return mode === 'print' && !this.settings.printInColor;
+    }
+
     private isDark(mode: ExportMode): boolean {
         return mode === 'preserve' && this.settings.preserveDarkPage;
     }
@@ -349,6 +359,17 @@ export class PDFExporter {
         }
     }
 
+    private imageDict = new Map<string, string>();
+
+    private imageRef(dataUrl: string): string {
+        let key = this.imageDict.get(dataUrl);
+        if (!key) {
+            key = `img${this.imageDict.size}`;
+            this.imageDict.set(dataUrl, key);
+        }
+        return key;
+    }
+
     private imageToContent(node: ImageNode, rc: RC): any {
         if (!node.dataUrl) {
             return {
@@ -363,7 +384,7 @@ export class PDFExporter {
         const pageHeight = this.settings.pageOrientation === 'landscape' ? pw : ph;
         const maxHeight = pageHeight - this.settings.marginTop - this.settings.marginBottom - 24;
         const avail = Math.max(10, rc.availWidth);
-        const base = { image: node.dataUrl, marginBottom: 6, alignment: node.align };
+        const base = { image: this.imageRef(node.dataUrl), marginBottom: 6, alignment: node.align };
 
         const { naturalWidth: nw, naturalHeight: nh } = node;
         // Obsidian sizes are CSS pixels; PDF points are 0.75 px.
@@ -555,7 +576,7 @@ export class PDFExporter {
         const dark = this.isDark(rc.mode);
         const type = CALLOUT_ALIASES[node.calloutType] ?? node.calloutType;
         // Print mode is greyscale: no hue anywhere, so it reproduces on a mono printer.
-        const bw = rc.mode === 'print';
+        const bw = this.isBw(rc.mode);
         const accent = bw ? '#555555' : (node.color ?? CALLOUT_COLORS[type] ?? '#6366f1');
         const bodyBg = bw ? '#f4f4f4' : mixHex(accent, dark ? '#1e1e1e' : '#ffffff', dark ? 0.12 : 0.1);
         const inner: RC = { ...rc, availWidth: rc.availWidth - CALLOUT_CHROME, tight: false };
@@ -590,6 +611,45 @@ export class PDFExporter {
         return out;
     }
 
+    /**
+     * Column widths that always fit the page. pdfmake's 'auto' sizes a column to
+     * its longest word and never shrinks it, so wide tables ran off the page.
+     * Each column wants its widest cell (capped) but needs at least its longest
+     * word; spare space is shared out in proportion to what columns want.
+     */
+    private columnWidths(grid: any[][], cols: number, rc: RC, fontSize: number, pad: number): { widths: number[]; fits: boolean; needSum: number } {
+        const charW = fontSize * 0.7; // wide enough for capitals and digits in bold
+        const want = Array<number>(cols).fill(0);
+        const need = Array<number>(cols).fill(0);
+        for (const row of grid) {
+            for (let c = 0; c < cols; c++) {
+                const g = row[c];
+                if (!g || g.placeholder || g.colSpan > 1) continue;
+                const text = nodesText(g.cell.content);
+                const longestWord = Math.max(0, ...text.split(/\s+/).map(w => w.length));
+                const longestLine = Math.max(0, ...text.split('\n').map(l => l.length));
+                want[c] = Math.max(want[c], Math.min(longestLine, 60) * charW);
+                need[c] = Math.max(need[c], Math.min(longestWord, 12) * charW);
+            }
+        }
+        // pdfmake adds cell padding on top of numeric widths and draws 0.5pt rules between columns.
+        const total = Math.max(40, rc.availWidth - 1 - 0.5 * (cols + 1));
+        const needSum = need.reduce((a, b) => a + b, 0);
+        const w = want.map((v, c) => Math.max(v, need[c]) + pad);
+        const min = need.map(v => v + pad);
+        const sumW = w.reduce((a, b) => a + b, 0);
+        if (sumW <= total) return { widths: w, fits: true, needSum };
+        const sumMin = min.reduce((a, b) => a + b, 0);
+        if (sumMin >= total) {
+            const k = total / sumMin; // even the minimums do not fit: shrink all and let words break
+            return { widths: min.map(v => Math.max(pad + 4, v * k)), fits: false, needSum };
+        }
+        const spare = total - sumMin;
+        const extra = w.map((v, c) => v - min[c]);
+        const sumExtra = extra.reduce((a, b) => a + b, 0) || 1;
+        return { widths: min.map((v, c) => v + spare * extra[c] / sumExtra), fits: true, needSum };
+    }
+
     private tableToContent(node: TableNode, rc: RC): any {
         const { mode, fontSize } = rc;
         const headerBg = !this.isDark(mode) ? '#eeeeee' : '#2d333b';
@@ -614,8 +674,19 @@ export class PDFExporter {
             }
         });
         const cols = Math.max(1, ...grid.map(r => r.length));
-        const cellWidth = Math.max(40, (rc.availWidth - 8 * cols) / cols);
-        const cellRc: RC = { ...rc, availWidth: cellWidth, tight: true };
+        let fs = rc.fontSize;
+        let cellPad = 16;      // padding 4+4 plus cell margins 4+4
+        let layoutPad = 4;     // pdfmake cell padding, each side
+        let cellMargin = 4;
+        let { widths, fits, needSum } = this.columnWidths(grid, cols, rc, fs, cellPad);
+        if (!fits) {
+            // Too many columns for the page at normal size: shrink text and padding to fit.
+            layoutPad = 1; cellMargin = 2; cellPad = 6;
+            const total = Math.max(40, rc.availWidth - 1 - 0.5 * (cols + 1));
+            const scale = Math.max(0.4, Math.min(1, (total - cols * cellPad) / (needSum || 1)));
+            fs = Math.max(4, rc.fontSize * scale);
+            widths = this.columnWidths(grid, cols, rc, fs, cellPad).widths;
+        }
 
         const body = grid.map((row, r) => {
             const out: any[] = [];
@@ -625,11 +696,16 @@ export class PDFExporter {
                 if (g.placeholder) { out.push({}); continue; }
                 const cell = g.cell as TableNode['rows'][number][number];
                 const isHeader = r < node.headerRows || cell.header;
+                const span = Math.max(1, g.colSpan as number);
+                let w = 0;
+                for (let k = 0; k < span; k++) w += widths[c + k] ?? 0;
+                const cellRc: RC = { ...rc, fontSize: fs, availWidth: Math.max(10, w - cellPad), tight: true };
                 const nodes = this.blocksToContent(cell.content, cellRc);
                 const obj: any = nodes.length === 1 && nodes[0].text !== undefined && !nodes[0].image
                     ? { ...nodes[0], marginBottom: 0 }
                     : { stack: nodes.length ? nodes : [{ text: '' }] };
-                obj.margin = [4, 3, 4, 3];
+                obj.margin = [cellMargin, cellMargin - 1, cellMargin, cellMargin - 1];
+                if (fs !== rc.fontSize) obj.fontSize = fs;
                 if (cell.align && !obj.alignment) obj.alignment = cell.align as Align;
                 if (isHeader) { obj.style = 'tableHeader'; obj.fillColor = headerBg; }
                 if (g.colSpan > 1) obj.colSpan = g.colSpan;
@@ -642,12 +718,16 @@ export class PDFExporter {
         return {
             table: {
                 headerRows: node.headerRows,
-                widths: Array(cols).fill('auto'),
+                widths: widths.map(v => Math.max(6, v - 2 * layoutPad)),
                 body,
             },
             layout: {
+                hLineWidth: () => 0.5,
+                vLineWidth: () => 0.5,
                 hLineColor: () => borderCol,
                 vLineColor: () => borderCol,
+                paddingLeft: () => layoutPad,
+                paddingRight: () => layoutPad,
             },
             marginBottom: 8,
             marginTop: 4,
@@ -692,8 +772,8 @@ export class PDFExporter {
         if (spans.length === 0) return '';
         const { mode, fontSize, availWidth } = rc;
         const dark = this.isDark(mode);
-        // Print mode is greyscale: author colours, pink code, yellow marks and blue links all drop out.
-        const bw = mode === 'print';
+        // Print mode is greyscale by default: author colours, pink code, yellow marks and blue links all drop out.
+        const bw = this.isBw(mode);
         const page = dark ? '#1e1e1e' : '#ffffff';
 
         return spans.map(span => {
@@ -720,7 +800,9 @@ export class PDFExporter {
             if (!bw) {
                 if (span.background && !span.monospace && !span.highlight) obj.background = span.background;
                 // Skip author colours that would vanish against the page (e.g. white on white).
-                if (span.color && hasContrast(span.color, page)) obj.color = span.color;
+                const surface = span.background && !span.monospace && !span.highlight ? span.background : page;
+                if (span.color && hasContrast(span.color, surface)) obj.color = span.color;
+                else if (surface !== page && luminance(surface) !== null) obj.color = (luminance(surface) as number) > 0.5 ? '#000000' : '#ffffff';
             }
             if (span.linkStyle) {
                 if (!bw && !obj.color) obj.color = !dark ? '#0055cc' : '#58a6ff';
@@ -734,6 +816,22 @@ export class PDFExporter {
 }
 
 // ── Text helpers ──────────────────────────────────────────────────────────────
+
+/** Plain text of content nodes, for sizing estimates only. */
+function nodesText(nodes: ContentNode[]): string {
+    const spans = (s: InlineSpan[]) => s.map(x => x.text).join('');
+    const parts: string[] = [];
+    for (const n of nodes as any[]) {
+        switch (n.type) {
+            case 'paragraph': case 'heading': parts.push(spans(n.content)); break;
+            case 'code_block': parts.push(n.code); break;
+            case 'list': for (const it of n.items) parts.push(spans(it.content), nodesText(it.children)); break;
+            case 'blockquote': case 'callout': parts.push(nodesText(n.content)); break;
+            default: break;
+        }
+    }
+    return parts.join('\n');
+}
 
 function luminance(hex: string): number | null {
     const rgb = hexToRgb(hex);

@@ -14,7 +14,7 @@ export default class PDFMakePlugin extends Plugin {
 
         this.addCommand({
             id: 'export-pdf',
-            name: 'Print-Ready PDF: export (default mode)',
+            name: 'Export to PDF (default mode)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
                     if (!checking) this.exportCurrentFile(this.settings.defaultMode);
@@ -26,7 +26,7 @@ export default class PDFMakePlugin extends Plugin {
 
         this.addCommand({
             id: 'export-pdf-print',
-            name: 'Print-Ready PDF: export (print optimized)',
+            name: 'Export to PDF (print optimized)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
                     if (!checking) this.exportCurrentFile('print');
@@ -38,7 +38,7 @@ export default class PDFMakePlugin extends Plugin {
 
         this.addCommand({
             id: 'export-pdf-preserve',
-            name: 'Print-Ready PDF: export (preserve formatting)',
+            name: 'Export to PDF (preserve formatting)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
                     if (!checking) this.exportCurrentFile('preserve');

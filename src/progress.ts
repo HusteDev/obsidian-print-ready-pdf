@@ -2,7 +2,12 @@ import { Notice } from 'obsidian';
 
 /** Lets the browser paint and handle input; the heavy steps below block the main thread. */
 export function yieldToUI(): Promise<void> {
-    return new Promise(resolve => window.setTimeout(resolve, 0));
+    // requestAnimationFrame guarantees a paint opportunity; the timeout covers hidden windows where it never fires.
+    return new Promise(resolve => {
+        const done = () => { window.clearTimeout(t); window.setTimeout(resolve, 0); };
+        const t = window.setTimeout(resolve, 100);
+        window.requestAnimationFrame(done);
+    });
 }
 
 /** One persistent notice whose text tracks the export stage. */

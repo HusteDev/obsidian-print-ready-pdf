@@ -166,8 +166,9 @@ export class DomExtractor {
             case 'PRE': {
                 // Read text from a copy without reading-view chrome (the "Copy" button etc.).
                 const clone = el.cloneNode(true) as HTMLElement;
-                clone.querySelectorAll(SKIP_SELECTOR).forEach(n => n.parentNode?.removeChild(n));
-                const code = (clone.textContent ?? '').replace(/\r\n?/g, '\n').replace(/\n$/, '');
+                clone.querySelectorAll(`${SKIP_SELECTOR}, button, select, input, .code-block-flair, .copy-code-button`)
+                    .forEach(n => n.parentNode?.removeChild(n));
+                const code = cleanText(clone.textContent ?? '', true).replace(/\r\n?/g, '\n').replace(/\n$/, '');
                 const lang = (el.querySelector('code')?.className.match(/language-(\S+)/)?.[1]) ?? '';
                 out.push({ type: 'code_block', language: lang, code });
                 return;
@@ -348,7 +349,7 @@ export class DomExtractor {
 
     private inline(node: Node, st: Style, out: Item[]): void {
         if (node.nodeType === 3) {
-            const text = (node.nodeValue ?? '').replace(/[ \t\r\n\f]+/g, ' ');
+            const text = cleanText(node.nodeValue ?? '').replace(/[ \t\r\n\f]+/g, ' ');
             if (text) out.push({ text, ...st });
             return;
         }
@@ -592,4 +593,18 @@ function mathSpan(el: HTMLElement, display: boolean): InlineSpan {
     if (!text) text = (el.querySelector('mjx-assistive-mml')?.textContent ?? '').replace(/\s+/g, ' ').trim();
     if (!text) text = '[formula]';
     return { text: tex ? (display ? `$$${text}$$` : `$${text}$`) : text, monospace: true };
+}
+
+
+/**
+ * Normalises text before it reaches the PDF: composes accents (a decomposed
+ * "e" + combining acute has no glyph in the standard fonts), and removes
+ * zero-width, soft-hyphen, bidi and control characters that would print as junk.
+ * Code keeps tabs and newlines.
+ */
+export function cleanText(text: string, keepWhitespace = false): string {
+    const ctrl = keepWhitespace
+        ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\uFE00-\uFE0F]/g
+        : /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\uFE00-\uFE0F]/g;
+    return text.normalize('NFC').replace(ctrl, '');
 }

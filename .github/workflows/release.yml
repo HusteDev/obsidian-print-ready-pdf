@@ -26,6 +26,8 @@ jobs:
           [ "$m" = "$tag" ] || { echo "manifest.json version $m != tag $tag"; exit 1; }
           [ "$p" = "$tag" ] || { echo "package.json version $p != tag $tag"; exit 1; }
           [ -n "$v" ] || { echo "versions.json has no entry for $tag"; exit 1; }
+          min="$(node -p "require('./manifest.json').minAppVersion")"
+          [ "$v" = "$min" ] || { echo "versions.json maps $tag to $v but manifest minAppVersion is $min"; exit 1; }
       - name: Typecheck
         run: npx tsc -noEmit -skipLibCheck
       - run: npm run build

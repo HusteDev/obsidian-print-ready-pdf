@@ -204,15 +204,26 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Default export mode')
-            .setDesc('Used by the "Export to PDF" command and the plain file-menu entry. The other commands always use their own mode.')
+            .setDesc('Used by the "Export to PDF (default mode)" command and menu entry. The other commands always use their own mode.')
             .addDropdown(d => d
                 .addOptions({
-                    print:    'Print optimized: clean, black and white',
+                    print:    'Print optimized: clean white page with the plain print layout',
                     preserve: 'Preserve formatting: keeps Obsidian styling (callout colors, highlights, heading sizes) on a white page',
                 })
                 .setValue(this.plugin.settings.defaultMode)
                 .onChange(async v => {
                     this.plugin.settings.defaultMode = v as PDFMakeSettings['defaultMode'];
+                    await this.plugin.saveSettings();
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('Print text in color')
+            .setDesc('Off by default: print mode renders all text, callouts, links and code in black and white. Turn on to print colors as displayed (callout colors, link blue, highlights, author colors) on a white page. Images are never converted.')
+            .addToggle(t => t
+                .setValue(this.plugin.settings.printInColor)
+                .onChange(async v => {
+                    this.plugin.settings.printInColor = v;
                     await this.plugin.saveSettings();
                 })
             );

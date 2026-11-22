@@ -220,7 +220,8 @@ export async function applyFallbackFonts(app: App, docDef: any, paths: string[])
             result.vfs[file] = buf;
             loaded.push({ name, cov });
         } catch (err) {
-            result.warnings.push(`Fallback font "${path}": ${err instanceof Error ? err.message : String(err)}`);
+            const reason = err instanceof RangeError ? 'corrupt or unsupported font file' : err instanceof Error ? err.message : String(err);
+            result.warnings.push(`Fallback font "${path}": ${reason.replace(/[\u0000-\u001F]/g, ' ')}`);
         }
     }
 

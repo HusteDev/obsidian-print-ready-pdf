@@ -59,6 +59,14 @@ export function toBase64(bytes: Uint8Array): string {
 /** An error whose message is safe to show in the PDF. Anything else becomes a generic reason. */
 class LoadError extends Error {}
 
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+    let timer = 0;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = window.setTimeout(() => reject(new LoadError(message)), ms);
+    });
+    return Promise.race([p, timeout]).finally(() => window.clearTimeout(timer));
+}
+
 interface Loaded { dataUrl: string; width?: number; height?: number }
 
 export class ImageLoader {
@@ -69,7 +77,9 @@ export class ImageLoader {
     /** Fills dataUrl/naturalWidth/naturalHeight, or sets unresolvedReason. Never throws. */
     async load(img: ImageNode, sourcePath: string): Promise<void> {
         if (img.unresolvedReason) return;
-        const key = img.svg ? `svg:${img.svg.length}:${img.svg.slice(0, 200)}` : `${img.vault ? 'v' : 'u'}:${img.src}`;
+        // Key on the resolved file so "a.png", "./a.png" and "folder/../a.png" decode once.
+        const resolved = !img.svg && img.vault ? this.resolveVaultFile(img.src, sourcePath)?.path : undefined;
+        const key = img.svg ? `svg:${img.svg.length}:${img.svg.slice(0, 200)}` : `${img.vault ? 'v' : 'u'}:${resolved ?? img.src}`;
         let pending = this.cache.get(key);
         if (!pending) {
             pending = this.loadUncached(img, sourcePath);
@@ -117,7 +127,7 @@ export class ImageLoader {
             return { bytes, hint: m[1] || 'application/octet-stream' };
         }
         if (/^https?:/i.test(src)) {
-            const res = await requestUrl({ url: src });
+            const res = await withTimeout(requestUrl({ url: src }), 15_000, 'remote image timed out');
             return { bytes: new Uint8Array(res.arrayBuffer), hint: res.headers['content-type'] ?? '' };
         }
         // app:// / capacitor:// resource URLs for vault files rendered by Obsidian.
