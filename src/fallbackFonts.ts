@@ -12,6 +12,7 @@
 // and it stays lightweight.
 import { App, Platform, TFile, normalizePath } from 'obsidian';
 import { toSfnt } from './woff';
+import type { PdfDocDef, PdfNode } from './pdfTypes';
 import symbolFont from './assets/SymbolsSubset.ttf';
 
 export const FONT_EXTENSIONS = ['ttf', 'otf', 'ttc', 'otc', 'woff', 'woff2'];
@@ -203,7 +204,7 @@ async function readFontBytes(app: App, path: string): Promise<ArrayBuffer> {
 const CHILD_KEYS = ['text', 'stack', 'ul', 'ol', 'columns', 'content', 'table', 'body'];
 const BASE_FONTS = new Set(['Helvetica', 'Courier']);
 
-function collectUncovered(node: any, out: Set<number>): void {
+function collectUncovered(node: unknown, out: Set<number>): void {
     if (typeof node === 'string') {
         for (const ch of node) {
             const cp = ch.codePointAt(0)!;
@@ -212,12 +213,13 @@ function collectUncovered(node: any, out: Set<number>): void {
     } else if (Array.isArray(node)) {
         for (const n of node) collectUncovered(n, out);
     } else if (node && typeof node === 'object') {
-        for (const k of CHILD_KEYS) if (k in node) collectUncovered(node[k], out);
+        const rec = node as Record<string, unknown>;
+        for (const k of CHILD_KEYS) if (k in rec) collectUncovered(rec[k], out);
     }
 }
 
 export interface FallbackResult {
-    fonts: Record<string, any>;
+    fonts: Record<string, Record<'normal' | 'bold' | 'italics' | 'bolditalics', string | [string, string | undefined]>>;
     vfs: Record<string, ArrayBuffer>;
     /** Human-readable warnings (unloadable fonts, uncovered characters). */
     warnings: string[];
@@ -227,7 +229,7 @@ export interface FallbackResult {
  * Rewrites `docDef` in place so characters outside WinAnsi use fallback fonts.
  * Returns extra fonts/vfs entries for pdfmake, or null when nothing was needed.
  */
-export async function applyFallbackFonts(app: App, docDef: any, paths: string[]): Promise<FallbackResult | null> {
+export async function applyFallbackFonts(app: App, docDef: PdfDocDef, paths: string[]): Promise<FallbackResult | null> {
     const needed = new Set<number>();
     collectUncovered(docDef.content, needed);
     if (needed.size === 0) return null;
@@ -247,7 +249,7 @@ export async function applyFallbackFonts(app: App, docDef: any, paths: string[])
         }
         if (!used) return;
         const file = `fallback/${name}.${cov.isCollection ? 'ttc' : 'ttf'}`;
-        const spec: any = cov.isCollection ? [file, cov.psName] : file;
+        const spec: string | [string, string | undefined] = cov.isCollection ? [file, cov.psName] : file;
         result.fonts[name] = { normal: spec, bold: spec, italics: spec, bolditalics: spec };
         result.vfs[file] = buf;
         loaded.push({ name, cov });
@@ -281,8 +283,8 @@ export async function applyFallbackFonts(app: App, docDef: any, paths: string[])
     const fontFor = (cp: number): string | undefined => owner.get(cp);
     const missing = new Set<number>();
 
-    const split = (s: string, inherited: string): any[] => {
-        const parts: any[] = [];
+    const split = (s: string, inherited: string): (string | { text: string; font: string })[] => {
+        const parts: (string | { text: string; font: string })[] = [];
         let buf = '';
         let curFont: string | undefined;
         const flush = () => {
@@ -312,28 +314,30 @@ export async function applyFallbackFonts(app: App, docDef: any, paths: string[])
     // `inline` is true for the contents of a `text` property: strings there are
     // runs that may be split in place. Elsewhere (stack, ul, table cells...) every
     // array element is a node, so a string must stay one element.
-    const walk = (node: any, font: string, inline: boolean): any => {
+    const walk = (node: unknown, font: string, inline: boolean): unknown => {
         if (typeof node === 'string') {
             const parts = split(node, font);
             if (parts.length === 1 && typeof parts[0] === 'string') return parts[0];
             return inline ? parts : { text: parts };
         }
         if (Array.isArray(node)) {
-            const out: any[] = [];
-            for (const n of node) {
+            const out: unknown[] = [];
+            for (const n of node as unknown[]) {
                 const r = walk(n, font, inline);
-                if (inline && typeof n === 'string' && Array.isArray(r)) out.push(...r); else out.push(r);
+                if (inline && typeof n === 'string' && Array.isArray(r)) out.push(...(r as unknown[])); else out.push(r);
             }
             return out;
         }
         if (node && typeof node === 'object') {
-            const f = typeof node.font === 'string' ? node.font : font;
-            for (const k of CHILD_KEYS) if (k in node) node[k] = walk(node[k], f, k === 'text');
-            return node;
+            const rec = node as Record<string, unknown>;
+            const f = typeof rec.font === 'string' ? rec.font : font;
+            for (const k of CHILD_KEYS) if (k in rec) rec[k] = walk(rec[k], f, k === 'text');
+            return rec;
         }
         return node;
     };
-    docDef.content = walk(docDef.content, docDef.defaultStyle?.font ?? 'Helvetica', false);
+    const defaultFont = docDef.defaultStyle?.font;
+    docDef.content = walk(docDef.content, typeof defaultFont === 'string' ? defaultFont : 'Helvetica', false) as PdfNode[];
 
     if (missing.size) {
         const sample = [...missing].slice(0, 8).map(cp => String.fromCodePoint(cp)).join(' ');

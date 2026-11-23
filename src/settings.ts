@@ -55,7 +55,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
             cls: 'setting-item-description',
         });
 
-        const marginDefs: { key: keyof PDFMakeSettings; label: string }[] = [
+        const marginDefs: { key: 'marginTop' | 'marginRight' | 'marginBottom' | 'marginLeft'; label: string }[] = [
             { key: 'marginTop',    label: 'Top'    },
             { key: 'marginRight',  label: 'Right'  },
             { key: 'marginBottom', label: 'Bottom' },
@@ -67,10 +67,10 @@ export class PDFMakeSettingTab extends PluginSettingTab {
                 .setName(`${label} margin`)
                 .addSlider(s => s
                     .setLimits(28, 180, 4)
-                    .setValue(this.plugin.settings[key] as number)
+                    .setValue(this.plugin.settings[key])
                     .setDynamicTooltip()
                     .onChange(async v => {
-                        (this.plugin.settings as any)[key] = v;
+                        this.plugin.settings[key] = v;
                         await this.plugin.saveSettings();
                     })
                 );

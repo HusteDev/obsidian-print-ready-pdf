@@ -1,4 +1,5 @@
 import { formatPageNumber } from './pageNumbers';
+import type { GridCell, PdfDocDef, PdfNode, PdfOut, PdfPageSize, PdfTableHost } from './pdfTypes';
 import { App, Notice, TFile, normalizePath } from 'obsidian';
 import {
     CalloutNode, ContentNode, ExportMode, ImageNode, MathNode, InlineSpan, ListNode, PDFMakeSettings,
@@ -28,7 +29,7 @@ function isOurRejection(reason: unknown): boolean {
     return OWN_ERROR_RE.test(stack);
 }
 
-async function renderPdf(docDef: any, extra?: FallbackResult | null): Promise<Uint8Array> {
+async function renderPdf(docDef: PdfDocDef, extra?: FallbackResult | null): Promise<Uint8Array> {
     const [{ default: pdfMake }, { FONTS, FONT_VFS }] = await Promise.all([
         import('pdfmake/build/pdfmake'),
         import('./fonts'),
@@ -45,7 +46,7 @@ async function renderPdf(docDef: any, extra?: FallbackResult | null): Promise<Ui
         const onRejection = (ev: PromiseRejectionEvent) => {
             if (!isOurRejection(ev.reason)) return;
             ev.preventDefault();
-            const reason = ev.reason;
+            const reason: unknown = ev.reason;
             finish(() => reject(reason instanceof Error ? reason : new Error(String(reason))));
         };
         const timer = window.setTimeout(
@@ -55,7 +56,7 @@ async function renderPdf(docDef: any, extra?: FallbackResult | null): Promise<Ui
         window.addEventListener('unhandledrejection', onRejection);
 
         try {
-            (pdfMake as any)
+            pdfMake
                 .createPdf(docDef, null, { ...FONTS, ...(extra?.fonts ?? {}) }, { ...FONT_VFS, ...(extra?.vfs ?? {}) })
                 .getBuffer((buffer: Uint8Array) => finish(() => resolve(buffer)));
         } catch (err) {
@@ -168,7 +169,7 @@ interface RC {
     tight?: boolean;
 }
 
-const asArray = (v: any): any[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+const asArray = <T>(v: T | T[] | null | undefined): T[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
 
 function hexToRgb(hex: string): [number, number, number] | null {
     const m = hex.match(/^#([0-9a-f]{6})$/i);
@@ -247,7 +248,7 @@ export class PDFExporter {
         return renderPdf(docDef, fallback);
     }
 
-    private buildDocDef(nodes: ContentNode[], mode: ExportMode): any {
+    private buildDocDef(nodes: ContentNode[], mode: ExportMode): PdfDocDef {
         const dark = this.isDark(mode);
         const styles = dark ? PRESERVE_DARK_STYLES : mode === 'preserve' ? PRESERVE_LIGHT_STYLES : PRINT_STYLES;
         const defaultColor = dark ? '#dcddde' : '#111111';
@@ -273,7 +274,7 @@ export class PDFExporter {
             pageOrientation: this.settings.pageOrientation,
             pageMargins: [marginLeft, marginTop, marginRight, marginBottom],
             ...(dark ? {
-                background: (_page: number, pageSize: any) => ({
+                background: (_page: number, pageSize: PdfPageSize) => ({
                     canvas: [{
                         type: 'rect',
                         x: 0, y: 0,
@@ -406,7 +407,7 @@ export class PDFExporter {
         return key;
     }
 
-    private imageToContent(node: ImageNode, rc: RC): any {
+    private imageToContent(node: ImageNode, rc: RC): PdfNode {
         if (!node.dataUrl) {
             return {
                 text: `[Image not embedded: ${node.alt || node.src || 'image'}${node.unresolvedReason ? ` (${node.unresolvedReason})` : ''}]`,
@@ -469,14 +470,14 @@ export class PDFExporter {
 
     // ── Node → pdfmake content ───────────────────────────────────────────────
 
-    private blocksToContent(nodes: ContentNode[], rc: RC): any[] {
-        const out: any[] = [];
+    private blocksToContent(nodes: ContentNode[], rc: RC): PdfNode[] {
+        const out: PdfNode[] = [];
         for (const n of nodes) out.push(...asArray(this.nodeToContent(n, rc)));
         return out;
     }
 
     /** A row-based accent frame (callouts, blockquotes): one row per block so it can split across pages. */
-    private framedRows(rows: { content: any; margin: number[] }[], accent: string, barWidth: number, fill: string | null): any {
+    private framedRows(rows: { content: PdfNode; margin: number[] }[], accent: string, barWidth: number, fill: string | null): PdfNode {
         return {
             table: {
                 widths: [barWidth, '*'],
@@ -486,7 +487,7 @@ export class PDFExporter {
                 ]),
             },
             layout: {
-                fillColor: (_row: number, _node: any, col: number) => (col === 0 ? accent : fill),
+                fillColor: (_row: number, _node: unknown, col: number) => (col === 0 ? accent : fill),
                 hLineWidth: () => 0,
                 vLineWidth: () => 0,
                 paddingLeft: () => 0,
@@ -499,7 +500,7 @@ export class PDFExporter {
         };
     }
 
-    private nodeToContent(node: ContentNode, rc: RC): any {
+    private nodeToContent(node: ContentNode, rc: RC): PdfOut {
         const { mode, fontSize, availWidth } = rc;
         switch (node.type) {
             case 'heading':
@@ -541,7 +542,7 @@ export class PDFExporter {
                     chunks.push(lines.slice(i, i + CODE_ROW_LINES).join('\n'));
                 }
                 const label = this.settings.showCodeLanguage ? cleanText(node.language.trim()) : '';
-                const body: any[] = [];
+                const body: PdfNode[][] = [];
                 const dark = this.isDark(mode);
                 const barBg = dark ? '#3b414d' : (this.isBw(mode) ? '#e0e0e0' : '#e4e6ea');
                 let barFg = dark ? '#f5f5f5' : (this.isBw(mode) ? '#000000' : '#111111');
@@ -571,12 +572,12 @@ export class PDFExporter {
                     layout: {
                         fillColor: (i: number) => (label && i === 0 ? barBg : codeBg),
                         // Rules only around the whole block, not between row chunks.
-                        hLineWidth: (i: number, n: any) => (i === 0 || i === n.table.body.length || (label && i === 1) ? 0.5 : 0),
+                        hLineWidth: (i: number, n: PdfTableHost) => (i === 0 || i === n.table.body.length || (label && i === 1) ? 0.5 : 0),
                         vLineWidth: () => 0.5,
                         hLineColor: () => borderCol,
                         vLineColor: () => borderCol,
                         paddingTop: (i: number) => (i === 0 ? (label ? 3.5 : 4) : 0),
-                        paddingBottom: (i: number, n: any) => (i === n.table.body.length - 1 ? 4 : (label && i === 0 ? 2.5 : 0)),
+                        paddingBottom: (i: number, n: PdfTableHost) => (i === n.table.body.length - 1 ? 4 : (label && i === 0 ? 2.5 : 0)),
                     },
                     marginBottom: 8,
                     marginTop: 2,
@@ -645,7 +646,7 @@ export class PDFExporter {
         }
     }
 
-    private calloutToContent(node: CalloutNode, rc: RC): any[] {
+    private calloutToContent(node: CalloutNode, rc: RC): PdfNode[] {
         const dark = this.isDark(rc.mode);
         const type = CALLOUT_ALIASES[node.calloutType] ?? node.calloutType;
         // Print mode is greyscale: no hue anywhere, so it reproduces on a mono printer.
@@ -661,9 +662,9 @@ export class PDFExporter {
             else segments[segments.length - 1].push(child);
         }
 
-        const out: any[] = [];
+        const out: PdfNode[] = [];
         segments.forEach((segment, si) => {
-            const rows: { content: any; margin: number[] }[] = [];
+            const rows: { content: PdfNode; margin: number[] }[] = [];
             if (si === 0) {
                 rows.push({
                     content: { text: this.spansToInline(node.title, inner), style: 'calloutTitle', color: bw ? undefined : accent },
@@ -690,7 +691,7 @@ export class PDFExporter {
      * Each column wants its widest cell (capped) but needs at least its longest
      * word; spare space is shared out in proportion to what columns want.
      */
-    private columnWidths(grid: any[][], cols: number, rc: RC, fontSize: number, pad: number): { widths: number[]; fits: boolean; needSum: number } {
+    private columnWidths(grid: (GridCell | undefined)[][], cols: number, rc: RC, fontSize: number, pad: number): { widths: number[]; fits: boolean; needSum: number } {
         const charW = fontSize * 0.7; // wide enough for capitals and digits in bold
         const want = Array<number>(cols).fill(0);
         const need = Array<number>(cols).fill(0);
@@ -723,13 +724,13 @@ export class PDFExporter {
         return { widths: min.map((v, c) => v + spare * extra[c] / sumExtra), fits: true, needSum };
     }
 
-    private tableToContent(node: TableNode, rc: RC): any {
+    private tableToContent(node: TableNode, rc: RC): PdfNode {
         const { mode } = rc;
         const headerBg = !this.isDark(mode) ? '#eeeeee' : '#2d333b';
         const borderCol = !this.isDark(mode) ? '#cccccc' : '#444c56';
 
         // Lay cells on a grid so colSpan/rowSpan placeholders line up.
-        const grid: any[][] = [];
+        const grid: (GridCell | undefined)[][] = [];
         node.rows.forEach((row, r) => {
             grid[r] = grid[r] ?? [];
             let c = 0;
@@ -762,19 +763,19 @@ export class PDFExporter {
         }
 
         const body = grid.map((row, r) => {
-            const out: any[] = [];
+            const out: PdfNode[] = [];
             for (let c = 0; c < cols; c++) {
                 const g = row[c];
                 if (!g) { out.push({ text: '' }); continue; }
                 if (g.placeholder) { out.push({}); continue; }
-                const cell = g.cell as TableNode['rows'][number][number];
+                const cell = g.cell;
                 const isHeader = r < node.headerRows || cell.header;
-                const span = Math.max(1, g.colSpan as number);
+                const span = Math.max(1, g.colSpan);
                 let w = 0;
                 for (let k = 0; k < span; k++) w += widths[c + k] ?? 0;
                 const cellRc: RC = { ...rc, fontSize: fs, availWidth: Math.max(10, w - cellPad), tight: true };
                 const nodes = this.blocksToContent(cell.content, cellRc);
-                const obj: any = nodes.length === 1 && nodes[0].text !== undefined && !nodes[0].image
+                const obj: PdfNode = nodes.length === 1 && nodes[0].text !== undefined && !nodes[0].image
                     ? { ...nodes[0], marginBottom: 0 }
                     : { stack: nodes.length ? nodes : [{ text: '' }] };
                 obj.margin = [cellMargin, cellMargin - 1, cellMargin, cellMargin - 1];
@@ -807,7 +808,7 @@ export class PDFExporter {
         };
     }
 
-    private listToContent(list: ListNode, rc: RC, marginBottom: number): any {
+    private listToContent(list: ListNode, rc: RC, marginBottom: number): PdfNode {
         const hasTasks = list.items.some(it => it.checked !== undefined);
         const accent = !this.isDark(rc.mode) ? '#444444' : '#aaaaaa';
         const inner: RC = { ...rc, availWidth: rc.availWidth - LIST_INDENT, tight: true };
@@ -841,7 +842,7 @@ export class PDFExporter {
 
     // ── Inline spans → pdfmake text array ────────────────────────────────────
 
-    private spansToInline(spans: InlineSpan[], rc: RC): any {
+    private spansToInline(spans: InlineSpan[], rc: RC): string | PdfNode[] {
         if (spans.length === 0) return '';
         const { mode, fontSize, availWidth } = rc;
         const dark = this.isDark(mode);
@@ -852,7 +853,7 @@ export class PDFExporter {
         return spans.map(span => {
             const size = Math.max(5, fontSize * (span.scale ?? 1));
             const codeSize = Math.max(8, size - 2);
-            const obj: any = { text: breakLongTokens(span.text, availWidth, span.monospace ? codeSize : size, !!span.monospace) };
+            const obj: PdfNode = { text: breakLongTokens(span.text, availWidth, span.monospace ? codeSize : size, !!span.monospace) };
             if (span.bold)        obj.bold = true;
             if (span.italics)     obj.italics = true;
             const deco: string[] = [];
@@ -894,11 +895,11 @@ export class PDFExporter {
 function nodesText(nodes: ContentNode[]): string {
     const spans = (s: InlineSpan[]) => s.map(x => x.text).join('');
     const parts: string[] = [];
-    for (const n of nodes as any[]) {
+    for (const n of nodes) {
         switch (n.type) {
             case 'paragraph': case 'heading': parts.push(spans(n.content)); break;
             case 'code_block': parts.push(n.code); break;
-            case 'list': for (const it of n.items) parts.push(spans(it.content), nodesText(it.children)); break;
+            case 'list': for (const it of n.items) parts.push(nodesText(it.content)); break;
             case 'blockquote': case 'callout': parts.push(nodesText(n.content)); break;
             default: break;
         }

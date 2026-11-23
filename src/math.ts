@@ -7,6 +7,7 @@ import { TeX } from 'mathjax-full/js/input/tex.js';
 import { SVG } from 'mathjax-full/js/output/svg.js';
 import { liteAdaptor } from 'mathjax-full/js/adaptors/liteAdaptor.js';
 import { RegisterHTMLHandler } from 'mathjax-full/js/handlers/html.js';
+import type { LiteElement } from 'mathjax-full/js/adaptors/lite/Element.js';
 import 'mathjax-full/js/input/tex/base/BaseConfiguration.js';
 import 'mathjax-full/js/input/tex/ams/AmsConfiguration.js';
 import 'mathjax-full/js/input/tex/newcommand/NewcommandConfiguration.js';
@@ -22,7 +23,7 @@ export interface TypesetMath {
     heightEx: number;
 }
 
-let state: { adaptor: ReturnType<typeof liteAdaptor>; doc: any } | null = null;
+let state: { adaptor: ReturnType<typeof liteAdaptor>; doc: ReturnType<typeof mathjax.document> } | null = null;
 
 function init() {
     if (state) return state;
@@ -38,7 +39,7 @@ function init() {
 /** Returns null when MathJax reports an error for this formula. */
 export function typesetMath(source: string, display: boolean): TypesetMath | null {
     const { adaptor, doc } = init();
-    const node = doc.convert(source, { display, em: 16, ex: 8, containerWidth: 80 * 16 });
+    const node = doc.convert(source, { display, em: 16, ex: 8, containerWidth: 80 * 16 }) as LiteElement;
     const markup: string = adaptor.innerHTML(node);
     const m = markup.match(/<svg\b[^>]*>/);
     if (!m || /data-mml-node="merror"/.test(markup)) return null;

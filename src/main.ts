@@ -113,9 +113,9 @@ export default class PDFMakePlugin extends Plugin {
             const content = await this.readContent(file);
             const exporter = new PDFExporter(this.app, this.settings, () => this.unloaded);
             await exporter.exportNote(content, file, mode, progress);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('[Print-Ready PDF]', err);
-            new Notice(`PDF export failed: ${err?.message ?? err}`);
+            new Notice(`PDF export failed: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
             progress.hide();
             this.exporting = false;
@@ -128,7 +128,8 @@ export default class PDFMakePlugin extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        const saved = (await this.loadData()) as Partial<PDFMakeSettings> | null;
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
     }
 
     async saveSettings() {
