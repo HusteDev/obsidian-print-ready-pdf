@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type PDFMakePlugin from './main';
 import type { PDFMakeSettings } from './types';
+import { PAGE_NUMBER_FORMATS } from './pageNumbers';
 import { FONT_EXTENSIONS } from './fallbackFonts';
 
 export class PDFMakeSettingTab extends PluginSettingTab {
@@ -241,14 +242,38 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Include page numbers')
-            .setDesc('Shows "current / total" in the footer of each page.')
             .addToggle(t => t
                 .setValue(this.plugin.settings.includePageNumbers)
                 .onChange(async v => {
                     this.plugin.settings.includePageNumbers = v;
                     await this.plugin.saveSettings();
+                    this.display();
                 })
             );
+
+        if (this.plugin.settings.includePageNumbers) {
+            new Setting(containerEl)
+                .setName('Page number format')
+                .addDropdown(d => d
+                    .addOptions(PAGE_NUMBER_FORMATS)
+                    .setValue(this.plugin.settings.pageNumberFormat)
+                    .onChange(async v => {
+                        this.plugin.settings.pageNumberFormat = v as PDFMakeSettings['pageNumberFormat'];
+                        await this.plugin.saveSettings();
+                    })
+                );
+
+            new Setting(containerEl)
+                .setName('Page number position')
+                .addDropdown(d => d
+                    .addOptions({ left: 'Left', center: 'Center', right: 'Right' })
+                    .setValue(this.plugin.settings.pageNumberAlign)
+                    .onChange(async v => {
+                        this.plugin.settings.pageNumberAlign = v as PDFMakeSettings['pageNumberAlign'];
+                        await this.plugin.saveSettings();
+                    })
+                );
+        }
 
         new Setting(containerEl)
             .setName('Output folder')

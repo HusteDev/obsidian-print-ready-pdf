@@ -1,3 +1,4 @@
+import { formatPageNumber } from './pageNumbers';
 import { App, Notice, TFile, normalizePath } from 'obsidian';
 import {
     Align, CalloutNode, ContentNode, ExportMode, ImageNode, InlineSpan, ListNode, PDFMakeSettings,
@@ -273,9 +274,10 @@ export class PDFExporter {
             } : {}),
             ...(this.settings.includePageNumbers ? {
                 footer: (currentPage: number, pageCount: number) => ({
-                    text: `${currentPage} / ${pageCount}`,
+                    text: formatPageNumber(this.settings.pageNumberFormat, currentPage, pageCount),
                     style: 'pageFooter',
-                    margin: [0, 8, 0, 0],
+                    alignment: this.settings.pageNumberAlign,
+                    margin: [marginLeft, 8, marginRight, 0],
                 }),
             } : {}),
         };

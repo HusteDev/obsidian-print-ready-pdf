@@ -8,7 +8,7 @@ Export an Obsidian note to PDF with [pdfmake](https://github.com/bpampuch/pdfmak
 - **Preserve formatting** mode: keeps Obsidian's styling (heading sizes, callout colors, highlights, code blocks) on a white page with dark text. An optional setting (off by default) renders a dark page instead.
 - Embeds vault and remote images from `![[image.png]]`, `![[image.png|300]]` and `![alt](path/image.png)`.
 - Page breaks: put `===` alone on a line, or use a `> [!page-break]` callout, to force a new page (configurable).
-- Page size (Letter, A4, Legal, Tabloid, A3, A5), orientation, margins and font size are set in the plugin's settings.
+- Page size (Letter, A4, Legal, Tabloid, A3, A5), orientation, margins, font size and page-number style (1, 1 of 10, 1 / 10, Page 1, Page 1 of 10, – 1 –; left, center or right) are set in the plugin's settings.
 - Exports never overwrite: if the file exists, a number is appended (`note-print (1).pdf`).
 
 <!-- TODO: capture docs/screenshot.png (settings tab and a sample exported PDF), then embed: ![Print-Ready PDF Export](docs/screenshot.png) -->

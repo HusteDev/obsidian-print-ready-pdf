@@ -2,6 +2,8 @@ export type ExportMode = 'preserve' | 'print';
 export type PageBreakSyntax = 'triple-equals' | 'callout' | 'both';
 export type PageSize = 'LETTER' | 'A4' | 'LEGAL' | 'TABLOID' | 'A3' | 'A5';
 export type Orientation = 'portrait' | 'landscape';
+export type PageNumberFormat = 'n' | 'n-of-total' | 'n-slash-total' | 'page-n' | 'page-n-of-total' | 'dash-n-dash';
+export type PageNumberAlign = 'left' | 'center' | 'right';
 
 export interface PDFMakeSettings {
     pageSize: PageSize;
@@ -15,6 +17,8 @@ export interface PDFMakeSettings {
     printInColor: boolean;
     pageBreakSyntax: PageBreakSyntax;
     includePageNumbers: boolean;
+    pageNumberFormat: PageNumberFormat;
+    pageNumberAlign: PageNumberAlign;
     baseFontSize: number;
     codeShrinkToFit: boolean;
     codeMinFontSize: number;
@@ -35,6 +39,8 @@ export const DEFAULT_SETTINGS: PDFMakeSettings = {
     printInColor: false,
     pageBreakSyntax: 'both',
     includePageNumbers: true,
+    pageNumberFormat: 'n-slash-total',
+    pageNumberAlign: 'center',
     baseFontSize: 12,
     codeShrinkToFit: true,
     codeMinFontSize: 6,
