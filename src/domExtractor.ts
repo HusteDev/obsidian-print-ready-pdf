@@ -169,7 +169,8 @@ export class DomExtractor {
                 clone.querySelectorAll(`${SKIP_SELECTOR}, button, select, input, .code-block-flair, .copy-code-button`)
                     .forEach(n => n.parentNode?.removeChild(n));
                 const code = cleanText(clone.textContent ?? '', true).replace(/\r\n?/g, '\n').replace(/\n$/, '');
-                const lang = (el.querySelector('code')?.className.match(/language-(\S+)/)?.[1]) ?? '';
+                const flair = el.querySelector('.code-block-flair')?.textContent?.trim() ?? '';
+                const lang = (el.querySelector('code')?.className.match(/language-(\S+)/)?.[1]) ?? el.className.match(/language-(\S+)/)?.[1] ?? flair;
                 out.push({ type: 'code_block', language: lang, code });
                 return;
             }

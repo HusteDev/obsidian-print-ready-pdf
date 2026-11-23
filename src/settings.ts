@@ -105,6 +105,17 @@ export class PDFMakeSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
+            .setName('Show code block language')
+            .setDesc('Print the language name above each fenced code block that has one.')
+            .addToggle(t => t
+                .setValue(this.plugin.settings.showCodeLanguage)
+                .onChange(async v => {
+                    this.plugin.settings.showCodeLanguage = v;
+                    await this.plugin.saveSettings();
+                })
+            );
+
+        new Setting(containerEl)
             .setName('Minimum code font size (pt)')
             .setDesc('Longer lines wrap below this size.')
             .addSlider(s => s

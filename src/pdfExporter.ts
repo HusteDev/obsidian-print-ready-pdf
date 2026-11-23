@@ -4,7 +4,7 @@ import {
     Align, CalloutNode, ContentNode, ExportMode, ImageNode, InlineSpan, ListNode, PDFMakeSettings,
     TableNode,
 } from './types';
-import { DomExtractor, walkNodes } from './domExtractor';
+import { DomExtractor, cleanText, walkNodes } from './domExtractor';
 import { ImageLoader } from './images';
 import { renderNote, protectPageBreaks } from './noteRenderer';
 import { ExportProgress, yieldToUI } from './progress';
@@ -507,14 +507,25 @@ export class PDFExporter {
                 for (let i = 0; i < lines.length; i += CODE_ROW_LINES) {
                     chunks.push(lines.slice(i, i + CODE_ROW_LINES).join('\n'));
                 }
-                const body = chunks.map((text, i) => [{
+                const label = this.settings.showCodeLanguage ? cleanText(node.language.trim()) : '';
+                const body: any[] = [];
+                if (label) {
+                    body.push([{
+                        text: label,
+                        font: 'Courier',
+                        fontSize: 7.5,
+                        color: !this.isDark(mode) ? '#666666' : '#9aa3b2',
+                        margin: [8, 4, 8, 0],
+                    }]);
+                }
+                chunks.forEach((text, i) => body.push([{
                     text: text === '' ? ' ' : text,
                     font: 'Courier',
                     fontSize: size,
                     color: codeColor,
-                    margin: [8, i === 0 ? 6 : 0, 8, i === chunks.length - 1 ? 6 : 0],
+                    margin: [8, i === 0 ? (label ? 2 : 6) : 0, 8, i === chunks.length - 1 ? 6 : 0],
                     preserveLeadingSpaces: true,
-                }]);
+                }]));
                 return {
                     table: { widths: ['*'], body },
                     layout: {

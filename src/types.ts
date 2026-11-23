@@ -21,6 +21,7 @@ export interface PDFMakeSettings {
     pageNumberAlign: PageNumberAlign;
     baseFontSize: number;
     codeShrinkToFit: boolean;
+    showCodeLanguage: boolean;
     codeMinFontSize: number;
     outputFolder: string;
     /** Font files (vault path, or absolute path on desktop) used for characters the built-in fonts lack. */
@@ -43,6 +44,7 @@ export const DEFAULT_SETTINGS: PDFMakeSettings = {
     pageNumberAlign: 'center',
     baseFontSize: 12,
     codeShrinkToFit: true,
+    showCodeLanguage: false,
     codeMinFontSize: 6,
     outputFolder: '',
     fallbackFonts: [],
