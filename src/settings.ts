@@ -132,7 +132,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl).setName('Fallback fonts').setHeading();
         containerEl.createEl('p', {
-            text: 'The built-in fonts only cover Western European characters. To export CJK, Cyrillic, Greek, symbols or emoji, add font files (.ttf, .otf, .ttc, .woff, .woff2). Each character uses the first font in this list that has it. Fonts are read only when a note needs them. Nothing is bundled. Use a vault path, or on desktop an absolute path. Large fonts (CJK) use a lot of memory on mobile; prefer a regional subset.',
+            text: 'The built-in fonts only cover Western European characters. To export CJK, Cyrillic, Greek, symbols or emoji, add font files (.ttf, .otf, .ttc, .woff, .woff2). Each character uses the first font in this list that has it. A small symbol font (Greek letters and common math symbols) is built in; fonts added here take priority. Fonts are read only when a note needs them. Use a vault path or an absolute path. CJK fonts are large, so a regional subset keeps exports fast.',
             cls: 'setting-item-description',
         });
 
