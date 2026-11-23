@@ -186,12 +186,14 @@ async function readFontBytes(app: App, path: string): Promise<ArrayBuffer> {
     // Hidden folders (e.g. .obsidian/) are not indexed but the adapter can read them.
     if (await app.vault.adapter.exists(vaultPath)) return app.vault.adapter.readBinary(vaultPath);
     if (Platform.isDesktopApp && /^([a-zA-Z]:[\\/]|\/|~)/.test(path)) {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        // Node built-ins exist only on desktop; this branch is guarded by Platform.isDesktopApp.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only Node API
         const fs = require('fs') as typeof import('fs');
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only Node API
         const os = require('os') as typeof import('os');
         const real = path.startsWith('~') ? os.homedir() + path.slice(1) : path;
         const data = await fs.promises.readFile(real);
-        return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+        return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
     }
     throw new Error('file not found');
 }
@@ -261,6 +263,7 @@ export async function applyFallbackFonts(app: App, docDef: any, paths: string[])
             register(await toSfnt(await readFontBytes(app, path)), path);
         } catch (err) {
             const reason = err instanceof RangeError ? 'corrupt or unsupported font file' : err instanceof Error ? err.message : String(err);
+            // eslint-disable-next-line no-control-regex -- strips control characters from an error message
             result.warnings.push(`Fallback font "${path}": ${reason.replace(/[\u0000-\u001F]/g, ' ')}`);
         }
     }

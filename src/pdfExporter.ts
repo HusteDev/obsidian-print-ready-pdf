@@ -1,7 +1,7 @@
 import { formatPageNumber } from './pageNumbers';
 import { App, Notice, TFile, normalizePath } from 'obsidian';
 import {
-    Align, CalloutNode, ContentNode, ExportMode, ImageNode, MathNode, InlineSpan, ListNode, PDFMakeSettings,
+    CalloutNode, ContentNode, ExportMode, ImageNode, MathNode, InlineSpan, ListNode, PDFMakeSettings,
     TableNode,
 } from './types';
 import { DomExtractor, cleanText, walkNodes } from './domExtractor';
@@ -59,7 +59,7 @@ async function renderPdf(docDef: any, extra?: FallbackResult | null): Promise<Ui
                 .createPdf(docDef, null, { ...FONTS, ...(extra?.fonts ?? {}) }, { ...FONT_VFS, ...(extra?.vfs ?? {}) })
                 .getBuffer((buffer: Uint8Array) => finish(() => resolve(buffer)));
         } catch (err) {
-            finish(() => reject(err));
+            finish(() => reject(err instanceof Error ? err : new Error(String(err))));
         }
     });
 }
@@ -724,7 +724,7 @@ export class PDFExporter {
     }
 
     private tableToContent(node: TableNode, rc: RC): any {
-        const { mode, fontSize } = rc;
+        const { mode } = rc;
         const headerBg = !this.isDark(mode) ? '#eeeeee' : '#2d333b';
         const borderCol = !this.isDark(mode) ? '#cccccc' : '#444c56';
 
@@ -779,7 +779,7 @@ export class PDFExporter {
                     : { stack: nodes.length ? nodes : [{ text: '' }] };
                 obj.margin = [cellMargin, cellMargin - 1, cellMargin, cellMargin - 1];
                 if (fs !== rc.fontSize) obj.fontSize = fs;
-                if (cell.align && !obj.alignment) obj.alignment = cell.align as Align;
+                if (cell.align && !obj.alignment) obj.alignment = cell.align;
                 if (isHeader) { obj.style = 'tableHeader'; obj.fillColor = headerBg; }
                 if (g.colSpan > 1) obj.colSpan = g.colSpan;
                 if (g.rowSpan > 1) obj.rowSpan = g.rowSpan;

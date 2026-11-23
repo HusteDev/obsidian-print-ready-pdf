@@ -13,7 +13,7 @@ export interface MathSource {
 const FENCE_RE = /^[\s>]*(?:[-*+]\s+|\d+[.)]\s+)?(`{3,}|~{3,})/;
 
 export function scanMath(markdown: string): MathSource[] {
-    let md = markdown.replace(/\r\n?/g, '\n').replace(/^﻿?---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/, '');
+    let md = markdown.replace(/\r\n?/g, '\n').replace(/^\uFEFF?---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/, '');
 
     // Drop fenced code; strip blockquote markers so callout bodies read as plain text.
     const kept: string[] = [];

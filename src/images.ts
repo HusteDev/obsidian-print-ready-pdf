@@ -51,7 +51,7 @@ export function toBase64(bytes: Uint8Array): string {
     let bin = '';
     const CHUNK = 0x8000;
     for (let i = 0; i < bytes.length; i += CHUNK) {
-        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
     }
     return btoa(bin);
 }
@@ -130,7 +130,8 @@ export class ImageLoader {
             }
             // Not resolvable by name: use the resource URL Obsidian itself rendered.
             if (!img.resourceUrl) throw new LoadError('not found');
-            const res = await fetch(img.resourceUrl);
+            // A local app:// resource URL from Obsidian itself, not a network request (requestUrl cannot read it).
+            const res = await window.fetch(img.resourceUrl);
             if (!res.ok) throw new LoadError('not found');
             return { bytes: new Uint8Array(await res.arrayBuffer()), hint: res.headers.get('content-type') ?? '' };
         }
@@ -147,7 +148,8 @@ export class ImageLoader {
             return { bytes: new Uint8Array(res.arrayBuffer), hint: res.headers['content-type'] ?? '' };
         }
         // app:// / capacitor:// resource URLs for vault files rendered by Obsidian.
-        const res = await fetch(src);
+        // Local app:// or capacitor:// resource URLs rendered by Obsidian (requestUrl cannot read them).
+        const res = await window.fetch(src);
         if (!res.ok) throw new LoadError(`HTTP ${res.status}`);
         return { bytes: new Uint8Array(await res.arrayBuffer()), hint: res.headers.get('content-type') ?? '' };
     }
@@ -194,7 +196,7 @@ export class ImageLoader {
             let ch = baseH * k;
             const over = Math.max(cw, ch) / maxDim;
             if (over > 1) { cw /= over; ch /= over; }
-            const canvas = document.createElement('canvas');
+            const canvas = createEl('canvas');
             canvas.width = Math.max(1, Math.round(cw));
             canvas.height = Math.max(1, Math.round(ch));
             const ctx = canvas.getContext('2d');

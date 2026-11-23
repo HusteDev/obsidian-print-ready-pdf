@@ -59,7 +59,6 @@ const INLINE_TAGS = new Set([
     'TT', 'U', 'VAR', 'BR', 'IMG', 'SVG', 'WBR', 'MJX-CONTAINER',
 ]);
 
-const BLOCK_TAGS_WITH_ALIGN = new Set(['P', 'DIV', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TD', 'TH', 'SECTION']);
 
 export class DomExtractor {
     private headingIds = new Set<string>();
@@ -221,7 +220,7 @@ export class DomExtractor {
                 out.push({ type: 'horizontal_rule' });
                 return;
             case 'TABLE': {
-                const cap = el.querySelector(':scope > caption') as HTMLElement | null;
+                const cap = el.querySelector<HTMLElement>(':scope > caption');
                 if (cap) {
                     const spans = this.spansOf(cap).map(sp => ({ ...sp, italics: true }));
                     if (spans.length) out.push({ type: 'paragraph', content: spans, align: 'center' });
@@ -280,7 +279,7 @@ export class DomExtractor {
             const task = li.getAttribute('data-task');
             if (task !== null) item.checked = task.trim() !== '';
             else {
-                const box = li.querySelector(':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]') as HTMLInputElement | null;
+                const box = li.querySelector<HTMLInputElement>(':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]');
                 if (box) item.checked = box.checked;
             }
             items.push(item);
@@ -329,8 +328,8 @@ export class DomExtractor {
             out.push({ type: 'page_break' });
             return;
         }
-        const titleEl = el.querySelector(':scope > .callout-title .callout-title-inner') as HTMLElement | null;
-        const contentEl = el.querySelector(':scope > .callout-content') as HTMLElement | null;
+        const titleEl = el.querySelector<HTMLElement>(':scope > .callout-title .callout-title-inner');
+        const contentEl = el.querySelector<HTMLElement>(':scope > .callout-content');
         let color: string | undefined;
         try {
             // Theme-resolved accent, e.g. "8, 109, 221"; honours custom callouts and snippets.
@@ -353,7 +352,7 @@ export class DomExtractor {
             this.pushInline(out, [el], bc);
             return;
         }
-        const inner = el.querySelector('.markdown-embed-content') as HTMLElement | null;
+        const inner = el.querySelector<HTMLElement>('.markdown-embed-content');
         if (inner && !el.classList.contains('is-loading')) {
             const content = this.blocks(inner, bc);
             if (content.length) { out.push({ type: 'blockquote', content }); return; }
@@ -445,7 +444,7 @@ export class DomExtractor {
         }
         if (el.classList.contains('image-embed')) {
             const img = el.querySelector('img');
-            if (img) out.push(this.image(img as HTMLImageElement));
+            if (img) out.push(this.image(img));
             else out.push({ type: 'placeholder', text: `[Image not found: ${el.getAttribute('src') ?? ''}]` });
             return;
         }
@@ -528,7 +527,7 @@ export class DomExtractor {
     // ── Images ───────────────────────────────────────────────────────────────
 
     private image(img: HTMLImageElement): ImageNode {
-        const embed = img.closest('.internal-embed') as HTMLElement | null;
+        const embed = img.closest<HTMLElement>('.internal-embed');
         const linkSrc = embed?.getAttribute('src') ?? null;
         const pick = (name: 'width' | 'height'): number | undefined =>
             px(img.getAttribute(name)) ?? px(embed?.getAttribute(name) ?? null) ?? px(img.style[name]);
@@ -726,7 +725,8 @@ function standaloneSvg(el: Element, w: number, h: number): string {
     bg.setAttribute('y', String(vy || 0));
     bg.setAttribute('width', String(vw || w));
     bg.setAttribute('height', String(vh || h));
-    bg.setAttribute('style', 'fill:#ffffff;stroke:none');
+    bg.setAttribute('fill', '#ffffff');
+    bg.setAttribute('stroke', 'none');
     clone.insertBefore(bg, clone.firstChild);
     return new XMLSerializer().serializeToString(clone);
 }
@@ -842,9 +842,12 @@ function mathSpan(el: HTMLElement, display: boolean): InlineSpan {
  */
 const SENTINEL = PAGEBREAK_SENTINEL;
 
+// The character classes below match control, zero-width and bidi characters on purpose.
+// eslint-disable-next-line no-control-regex, no-misleading-character-class -- intentionally strips control and invisible characters
+const STRIP_KEEP_WHITESPACE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\uFE00-\uFE0F]/g;
+// eslint-disable-next-line no-control-regex, no-misleading-character-class -- intentionally strips control and invisible characters
+const STRIP_ALL = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\uFE00-\uFE0F]/g;
+
 export function cleanText(text: string, keepWhitespace = false): string {
-    const ctrl = keepWhitespace
-        ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\uFE00-\uFE0F]/g
-        : /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\uFE00-\uFE0F]/g;
-    return text.normalize('NFC').replace(ctrl, '');
+    return text.normalize('NFC').replace(keepWhitespace ? STRIP_KEEP_WHITESPACE : STRIP_ALL, '');
 }
