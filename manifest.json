@@ -6,5 +6,5 @@
     "description": "Export notes to PDF with print-optimized or formatting-preserving modes, page-break controls and full layout customization.",
     "author": "HusteDev",
     "authorUrl": "https://github.com/HusteDev",
-    "isDesktopOnly": false
+    "isDesktopOnly": true
 }

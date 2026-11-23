@@ -2,6 +2,8 @@
 
 Export an Obsidian note to PDF with [pdfmake](https://github.com/bpampuch/pdfmake). Two modes, explicit page breaks, and full layout control.
 
+**Desktop only** (Windows, macOS and Linux) for now. Mobile support may come later.
+
 ## Features
 
 - **Print optimized** mode: clean, print-friendly output. All text, callouts, links and code are black and white by default; turn on "Print text in color" in settings to print colors as displayed. Images are never converted.
@@ -9,6 +11,7 @@ Export an Obsidian note to PDF with [pdfmake](https://github.com/bpampuch/pdfmak
 - Embeds vault and remote images from `![[image.png]]`, `![[image.png|300]]` and `![alt](path/image.png)`.
 - Page breaks: put `===` alone on a line, or use a `> [!page-break]` callout, to force a new page (configurable).
 - Page size (Letter, A4, Legal, Tabloid, A3, A5), orientation, margins, font size and page-number style (1, 1 of 10, 1 / 10, Page 1, Page 1 of 10, – 1 –; left, center or right) are set in the plugin's settings.
+- Math: `$$…$$` display math is typeset and embedded as vector graphics; inline `$…$` math is converted to plain text where possible (see Limitations).
 - Code blocks: "Shrink code blocks to fit" (on by default) reduces the font size so the longest line fits without wrapping, down to "Minimum code font size" (6 pt by default); longer lines wrap below that. "Show code block language" (off by default) adds a header bar across the top of each fenced code block that has a language, showing the language name.
 - Exports never overwrite: if the file exists, a number is appended (`note-print (1).pdf`).
 
@@ -31,15 +34,15 @@ The note is rendered with Obsidian's own reading-view renderer and the result is
 - An image in the middle of a line of text is placed on its own line, between the text before and after it.
 - Math: display math (`$$…$$`) is typeset with a bundled MathJax and embedded as vector graphics. Inline math (`$…$`) cannot sit inside a line of text as a picture (pdfmake has no inline images), so simple formulas (Greek letters, operators, relations, arrows, sub/superscripts such as `x^2` or `\alpha + \beta`) are shown as plain text and anything that needs typesetting (fractions, roots, matrices, limits) as its TeX source in monospace. Greek letters and common math symbols print out of the box using a small built-in font subset (DejaVu Sans); a fallback font you configure takes priority, and anything neither covers falls back to an ASCII stand-in or `?`. MathJax is bundled, which makes `main.js` about 1.7 MB larger. If a formula cannot be matched to its source or fails to typeset, its TeX is shown instead. PDF, audio and video embeds become a placeholder line. Interactive plugin output is exported as Reading view shows it once it has finished rendering.
 - Preserve mode does not follow your Obsidian theme: page, text and code colors are fixed, and only callout colors come from the theme.
-- Mobile: it has not been verified on a device yet. Everything except reading fallback fonts from an absolute disk path (desktop only, via Node's `fs`) uses browser and Obsidian APIs; it writes through the vault API and downscales images (longest edge 1400 px on phones, 1800 px on desktop; JPEGs stay JPEG). WOFF and WOFF2 fallback fonts need the browser's `DecompressionStream` (Electron, iOS 16.4+, Android WebView). PDF layout runs on the main thread, so very long notes make the app pause for a few seconds while "Building PDF…" shows; phones can run out of memory on notes with hundreds of large images.
+- Desktop only: the plugin is marked desktop-only (Windows, macOS, Linux); it is not available on iOS or Android. Images are downscaled to at most 1800 px on the longest edge (JPEGs stay JPEG). PDF layout runs on the main thread, so very long notes make Obsidian pause for a few seconds while "Building PDF…" shows.
 
 ## Non-Latin characters and symbols
 
-The built-in PDF fonts cover Western European text only. To export CJK, Cyrillic, Greek, arrows, symbols or emoji, add one or more font files under Settings → Print-Ready PDF → Fallback fonts (vault path, or an absolute path on desktop; `.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`). Each character uses the first listed font that contains it. Fonts are loaded only when a note needs them and are not bundled. Emoji render as monochrome glyphs. On mobile, prefer a regional subset font (CJK fonts are large). Characters no font covers are replaced with `?` and a notice is shown.
+The built-in PDF fonts cover Western European text only. To export CJK, Cyrillic, Greek, arrows, symbols or emoji, add one or more font files under Settings → Print-Ready PDF → Fallback fonts (vault path, or an absolute path on desktop; `.ttf`, `.otf`, `.ttc`, `.woff`, `.woff2`). Each character uses the first listed font that contains it. Fonts you add are loaded only when a note needs them and are not bundled; the plugin itself includes only a small DejaVu Sans symbol subset (Greek letters and common math symbols), and your fallback fonts take priority over it. Emoji render as monochrome glyphs. CJK fonts are large, so a regional subset font keeps exports fast. Characters no font covers are replaced with `?` and a notice is shown.
 
 ## Installation
 
-Until it appears in the community plugin list, install manually: copy `main.js`, `manifest.json` and `styles.css` from the latest release into `<vault>/.obsidian/plugins/print-ready-pdf/`, then enable the plugin.
+Until it appears in the community plugin list, install manually (desktop only): copy `main.js`, `manifest.json` and `styles.css` from the latest release into `<vault>/.obsidian/plugins/print-ready-pdf/`, then enable the plugin.
 
 ## Development
 
