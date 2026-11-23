@@ -49,7 +49,7 @@
    and under 640px. The export host is only as wide as the PDF page, so give
    diagrams a wide container to keep Obsidian's own layout; the exporter scales
    the result down to the page width. */
-.pdfmake-render-host .mermaid {
-    width: 4000px !important;
-    max-width: none !important;
+.markdown-preview-view.markdown-rendered.pdfmake-render-host .mermaid {
+    width: 4000px;
+    max-width: none;
 }
