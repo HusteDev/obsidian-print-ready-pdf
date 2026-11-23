@@ -55,7 +55,7 @@ npm run build
 
 ## Privacy and network use
 
-The plugin collects no telemetry and sends no note content anywhere. The only network requests it makes are downloads of remote images (`http://` and `https://` image URLs) that a note embeds, and only while a PDF is being exported. Everything else (rendering, math typesetting, fonts, PDF layout) runs locally. Remote images are also fetched by Obsidian's own renderer when it displays the note, as in Reading view.
+The plugin collects no telemetry and sends no note content anywhere. The only network requests it makes are downloads of remote images (`http://` and `https://` image URLs) that a note embeds, and only while a PDF is being exported. Everything else (rendering, math typesetting, fonts, PDF layout) runs locally. The optional fallback fonts setting can read a font file from an absolute path outside your vault, on desktop only and only when you configure it, to embed its glyphs into the PDF. Remote images are also fetched by Obsidian's own renderer when it displays the note, as in Reading view.
 
 ## License
 
