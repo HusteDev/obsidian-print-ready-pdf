@@ -551,23 +551,163 @@ export class DomExtractor {
     private svgNode(el: HTMLElement): ImageNode | null {
         const rect = el.getBoundingClientRect();
         if (rect.width < 8 || rect.height < 8) return null; // icons and decoration
-        // Give the root explicit pixel dimensions (mermaid uses width="100%", which
-        // would otherwise rasterize at the browser's default 300x150).
-        const clone = el.cloneNode(true) as HTMLElement;
-        clone.setAttribute('width', String(Math.round(rect.width)));
-        clone.setAttribute('height', String(Math.round(rect.height)));
-        if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-        clone.removeAttribute('style');
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
         return {
             type: 'image',
             alt: 'diagram',
             src: '',
             vault: false,
-            svg: new XMLSerializer().serializeToString(clone),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
+            svg: standaloneSvg(el, w, h),
+            width: w,
+            height: h,
         };
     }
+}
+
+// ── Standalone SVG ────────────────────────────────────────────────────────────
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * Computed properties copied onto every element. A rendered diagram (mermaid)
+ * styles itself with an embedded <style> that uses Obsidian theme variables and
+ * class selectors; once the markup is serialised into a standalone data URL
+ * none of that resolves and every shape falls back to a black fill. Resolving the
+ * values here makes the SVG self-contained.
+ */
+const SVG_PROPS = [
+    'fill', 'fill-opacity', 'fill-rule', 'stroke', 'stroke-width', 'stroke-opacity',
+    'stroke-dasharray', 'stroke-linecap', 'stroke-linejoin', 'opacity', 'stop-color', 'stop-opacity',
+    'font-family', 'font-size', 'font-weight', 'font-style', 'text-anchor', 'dominant-baseline',
+    'letter-spacing', 'text-decoration', 'color', 'marker-start', 'marker-mid', 'marker-end',
+];
+const COLOR_PROPS = new Set(['fill', 'stroke', 'stop-color', 'color']);
+
+/** Flip the lightness of an rgb()/rgba() colour, keeping hue and saturation, so a dark theme prints on white. */
+function lightColor(value: string): string {
+    const m = /^rgba?\(\s*(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)(?:[ ,/]+(\d*\.?\d+%?))?\s*\)$/.exec(value.trim());
+    if (!m) return value;
+    const r = +m[1] / 255, g = +m[2] / 255, b = +m[3] / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const l = (max + min) / 2;
+    const d = max - min;
+    let hue = 0, sat = 0;
+    if (d > 0) {
+        sat = d / (1 - Math.abs(2 * l - 1));
+        if (max === r) hue = ((g - b) / d + 6) % 6;
+        else if (max === g) hue = (b - r) / d + 2;
+        else hue = (r - g) / d + 4;
+        hue *= 60;
+    }
+    const l2 = 1 - l;
+    const c = (1 - Math.abs(2 * l2 - 1)) * sat;
+    const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+    const mm = l2 - c / 2;
+    const [r1, g1, b1] = hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x]
+        : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
+    const to = (v: number) => Math.round((v + mm) * 255);
+    return m[4] !== undefined
+        ? `rgba(${to(r1)},${to(g1)},${to(b1)},${m[4]})`
+        : `rgb(${to(r1)},${to(g1)},${to(b1)})`;
+}
+
+/** Text of an HTML label as lines: <br> and block elements start a new line. */
+function labelLines(root: Element): string[] {
+    const lines: string[] = [''];
+    const BLOCK = new Set(['DIV', 'P', 'LI', 'UL', 'OL', 'TR']);
+    const walk = (n: Node) => {
+        if (n.nodeType === 3) { lines[lines.length - 1] += (n.nodeValue ?? '').replace(/\s+/g, ' '); return; }
+        if (n.nodeType !== 1) return;
+        const e = n as Element;
+        const tag = e.tagName.toUpperCase();
+        if (tag === 'BR') { lines.push(''); return; }
+        const block = BLOCK.has(tag) && lines[lines.length - 1].trim() !== '';
+        if (block) lines.push('');
+        e.childNodes.forEach(walk);
+        if (block) lines.push('');
+    };
+    root.childNodes.forEach(walk);
+    return lines.map(l => l.trim()).filter(l => l !== '');
+}
+
+/**
+ * Builds a self-contained copy of a rendered inline <svg>: computed styles are
+ * written onto each element, <foreignObject> HTML labels become real <text>, the
+ * theme is forced light, and a white background plus explicit size are added.
+ */
+function standaloneSvg(el: Element, w: number, h: number): string {
+    const clone = el.cloneNode(true) as Element;
+    const liveAll = [el, ...Array.from(el.querySelectorAll('*'))];
+    const cloneAll = [clone, ...Array.from(clone.querySelectorAll('*'))];
+    const dark = document.body.classList.contains('theme-dark');
+    const fix = (prop: string, v: string) => (dark && COLOR_PROPS.has(prop) ? lightColor(v) : v);
+
+    liveAll.forEach((live, i) => {
+        const copy = cloneAll[i];
+        if (copy !== clone && !clone.contains(copy)) return; // inside an already replaced foreignObject
+        if (live.tagName.toLowerCase() === 'foreignobject') {
+            const walker = document.createTreeWalker(live, NodeFilter.SHOW_TEXT);
+            let labelEl: Element = live;
+            for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+                if ((t.nodeValue ?? '').trim() !== '' && t.parentElement) { labelEl = t.parentElement; break; }
+            }
+            const lcs = getComputedStyle(labelEl);
+            const lines = labelLines(copy);
+            if (!lines.length) { copy.remove(); return; }
+            const fx = parseFloat(copy.getAttribute('x') ?? '0') || 0;
+            const fy = parseFloat(copy.getAttribute('y') ?? '0') || 0;
+            const fw = parseFloat(copy.getAttribute('width') ?? '0') || 0;
+            const fh = parseFloat(copy.getAttribute('height') ?? '0') || 0;
+            const size = parseFloat(lcs.fontSize) || 14;
+            const lh = size * 1.2;
+            const text = document.createElementNS(SVG_NS, 'text');
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('dominant-baseline', 'central');
+            text.setAttribute('fill', fix('color', lcs.color));
+            text.setAttribute('stroke', 'none');
+            text.setAttribute('font-family', lcs.fontFamily);
+            text.setAttribute('font-size', `${size}px`);
+            text.setAttribute('font-weight', lcs.fontWeight);
+            text.setAttribute('font-style', lcs.fontStyle);
+            const cx = fx + fw / 2;
+            const top = fy + fh / 2 - ((lines.length - 1) * lh) / 2;
+            lines.forEach((line, n) => {
+                const t = document.createElementNS(SVG_NS, 'tspan');
+                t.setAttribute('x', String(cx));
+                t.setAttribute('y', String(top + n * lh));
+                t.textContent = line;
+                text.appendChild(t);
+            });
+            copy.replaceWith(text);
+            return;
+        }
+        if (copy.tagName.toLowerCase() === 'style') { copy.remove(); return; }
+        const cs = getComputedStyle(live);
+        const style: string[] = [];
+        for (const prop of SVG_PROPS) {
+            const v = cs.getPropertyValue(prop);
+            if (v) style.push(`${prop}:${fix(prop, v)}`);
+        }
+        if (cs.display === 'none') style.push('display:none');
+        copy.setAttribute('style', style.join(';'));
+    });
+
+    // Explicit size and a viewBox so the rasteriser knows the geometry.
+    clone.setAttribute('width', String(w));
+    clone.setAttribute('height', String(h));
+    if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', SVG_NS);
+    let vb = clone.getAttribute('viewBox');
+    if (!vb) { vb = `0 0 ${w} ${h}`; clone.setAttribute('viewBox', vb); }
+    const [vx, vy, vw, vh] = vb.split(/[ ,]+/).map(Number);
+    const bg = document.createElementNS(SVG_NS, 'rect');
+    bg.setAttribute('x', String(vx || 0));
+    bg.setAttribute('y', String(vy || 0));
+    bg.setAttribute('width', String(vw || w));
+    bg.setAttribute('height', String(vh || h));
+    bg.setAttribute('style', 'fill:#ffffff;stroke:none');
+    clone.insertBefore(bg, clone.firstChild);
+    return new XMLSerializer().serializeToString(clone);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

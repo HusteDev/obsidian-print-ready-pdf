@@ -567,7 +567,7 @@ export class PDFExporter {
                     preserveLeadingSpaces: true,
                 }]));
                 return {
-                    table: { widths: ['*'], body },
+                    table: label ? { widths: ['*'], body, headerRows: 1, keepWithHeaderRows: 1 } : { widths: ['*'], body },
                     layout: {
                         fillColor: (i: number) => (label && i === 0 ? barBg : codeBg),
                         // Rules only around the whole block, not between row chunks.
