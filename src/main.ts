@@ -18,7 +18,7 @@ export default class PDFMakePlugin extends Plugin {
             name: 'Export to PDF (default mode)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
-                    if (!checking) this.exportCurrentFile(this.settings.defaultMode);
+                    if (!checking) void this.exportCurrentFile(this.settings.defaultMode);
                     return true;
                 }
                 return false;
@@ -30,7 +30,7 @@ export default class PDFMakePlugin extends Plugin {
             name: 'Export to PDF (print optimized)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
-                    if (!checking) this.exportCurrentFile('print');
+                    if (!checking) void this.exportCurrentFile('print');
                     return true;
                 }
                 return false;
@@ -42,7 +42,7 @@ export default class PDFMakePlugin extends Plugin {
             name: 'Export to PDF (preserve formatting)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
-                    if (!checking) this.exportCurrentFile('preserve');
+                    if (!checking) void this.exportCurrentFile('preserve');
                     return true;
                 }
                 return false;
@@ -55,7 +55,7 @@ export default class PDFMakePlugin extends Plugin {
             el.querySelectorAll('p').forEach(p => {
                 if (this.settings.pageBreakSyntax !== 'callout' && p.children.length === 0 && p.textContent?.trim() === '===') {
                     p.addClass('pdfmake-page-break-marker');
-                    p.textContent = '— Page Break —';
+                    p.textContent = '— page break —';
                 }
             });
         });
@@ -65,15 +65,15 @@ export default class PDFMakePlugin extends Plugin {
                 if (!['more-options', 'file-explorer-context-menu'].includes(source) || !(file instanceof TFile) || file.extension !== 'md') return;
                 menu.addSeparator();
                 menu.addItem(item => item
-                    .setTitle('Print-Ready PDF: export (default mode)')
+                    .setTitle('Print-ready PDF: export (default mode)')
                     .setIcon('file-down')
                     .onClick(() => this.exportFile(file, this.settings.defaultMode)));
                 menu.addItem(item => item
-                    .setTitle('Print-Ready PDF: export (print optimized)')
+                    .setTitle('Print-ready PDF: export (print optimized)')
                     .setIcon('printer')
                     .onClick(() => this.exportFile(file, 'print')));
                 menu.addItem(item => item
-                    .setTitle('Print-Ready PDF: export (preserve formatting)')
+                    .setTitle('Print-ready PDF: export (preserve formatting)')
                     .setIcon('file-text')
                     .onClick(() => this.exportFile(file, 'preserve')));
             })
@@ -85,7 +85,7 @@ export default class PDFMakePlugin extends Plugin {
     private async exportCurrentFile(mode: ExportMode): Promise<void> {
         const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
         if (!file) {
-            new Notice('No active markdown file');
+            new Notice('No active Markdown file');
             return;
         }
         await this.exportFile(file, mode);

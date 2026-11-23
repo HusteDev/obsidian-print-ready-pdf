@@ -51,7 +51,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl).setName('Margins').setHeading();
         containerEl.createEl('p', {
-            text: 'Values in points (pt). 72 pt = 1 inch, 28 pt ≈ 1 cm.',
+            text: 'Values are in points (pt). One inch is 72 pt, and one centimetre is about 28 pt.',
             cls: 'setting-item-description',
         });
 
@@ -132,7 +132,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl).setName('Fallback fonts').setHeading();
         containerEl.createEl('p', {
-            text: 'The built-in fonts only cover Western European characters. To export CJK, Cyrillic, Greek, symbols or emoji, add font files (.ttf, .otf, .ttc, .woff, .woff2). Each character uses the first font in this list that has it. A small symbol font (Greek letters and common math symbols) is built in; fonts added here take priority. Fonts are read only when a note needs them. Use a vault path or an absolute path. CJK fonts are large, so a regional subset keeps exports fast.',
+            text: 'The built-in fonts only cover the basic character set. To export other scripts, symbols or emoji, add font files (.ttf, .otf, .ttc, .woff, .woff2). Each character uses the first font in this list that has it. A small symbol font for math is built in; fonts added here take priority. Fonts are read only when a note needs them. Use a vault path or an absolute path. Large fonts slow exports down, so prefer a subset font.',
             cls: 'setting-item-description',
         });
 
@@ -212,11 +212,11 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         // ── Export ───────────────────────────────────────────────────────────
 
-        new Setting(containerEl).setName('Export options').setHeading();
+        new Setting(containerEl).setName('Output').setHeading();
 
         new Setting(containerEl)
             .setName('Default export mode')
-            .setDesc('Used by "Export to PDF (default mode)". Print optimized is a plain print layout; Preserve formatting keeps Obsidian\'s styling (callout colors, highlights, heading sizes). The other commands always use their own mode.')
+            .setDesc('Used by the default-mode export command. Print optimized is a plain print layout; preserve formatting keeps the styling from Obsidian (callout colors, highlights, heading sizes). The other commands always use their own mode.')
             .addDropdown(d => d
                 .addOptions({
                     print:    'Print optimized',
@@ -288,9 +288,9 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Output folder')
-            .setDesc('Vault folder for saved PDFs. Leave empty to save next to the note. Existing files are never overwritten.')
+            .setDesc('Vault folder for exported PDF files. Leave empty to save next to the note. Existing files are never overwritten.')
             .addText(t => t
-                .setPlaceholder('e.g. Exports/PDF')
+                .setPlaceholder('Exports/PDF')
                 .setValue(this.plugin.settings.outputFolder)
                 .onChange(async v => {
                     this.plugin.settings.outputFolder = v.trim();
