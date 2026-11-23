@@ -73,13 +73,34 @@ export class DomExtractor {
         const sources = this.opts.mathSources;
         if (!sources || !sources.length) return;
         const els = Array.from(root.querySelectorAll('.math'));
-        const agree = els.length === sources.length
-            && els.every((e, i) => e.classList.contains('math-block') === sources[i].display);
-        if (!agree) {
+        // Counts must agree. Kinds are not compared: Obsidian may render a one-line
+        // double-dollar formula inside a callout without the math-block class.
+        if (els.length !== sources.length) {
             console.warn(`[Print-Ready PDF] Math scan found ${sources.length}, rendered ${els.length}; showing rendered text`);
             return;
         }
         els.forEach((e, i) => this.mathByEl.set(e, sources[i]));
+    }
+
+    /**
+     * One rendered formula. TeX comes from Obsidian's own annotation when present, else
+     * from the scanned markdown. Display math becomes a MathNode (typeset later, even
+     * inside a paragraph or callout); inline math cannot sit in a text run as a picture,
+     * so it is plain text for simple formulas and the TeX source otherwise.
+     */
+    private mathItem(el: HTMLElement, st: Style): InlineSpan | ContentNode {
+        const src = this.mathByEl.get(el);
+        const annotated = el.querySelector('annotation[encoding="application/x-tex"]')?.textContent?.trim();
+        const tex = annotated || src?.tex;
+        const display = el.classList.contains('math-block')
+            || el.getAttribute('display') === 'true'
+            || el.querySelector('mjx-container[display="true"]') !== null
+            || (!el.classList.contains('math-inline') && src?.display === true);
+        if (!tex) return { ...st, ...mathSpan(el, display) };
+        if (display) return { type: 'math', tex, fallback: `$$${tex}$$` };
+        const simple = simplifyTeX(tex);
+        if (simple !== null) return { ...st, text: simple, italics: true };
+        return { ...st, text: `$${tex}$`, monospace: true };
     }
 
     extract(root: HTMLElement): ContentNode[] {
@@ -153,9 +174,9 @@ export class DomExtractor {
             return;
         }
         if (el.classList.contains('math-block')) {
-            const src = this.mathByEl.get(el);
-            if (src) out.push({ type: 'math', tex: src.tex, fallback: `$$${src.tex}$$` });
-            else out.push({ type: 'paragraph', content: [mathSpan(el, true)], align: 'center' });
+            const item = this.mathItem(el, {});
+            if ('type' in item) out.push(item);
+            else out.push({ type: 'paragraph', content: [item], align: 'center' });
             return;
         }
 
@@ -429,13 +450,7 @@ export class DomExtractor {
             return;
         }
         if (tag === 'MJX-CONTAINER' || el.classList.contains('math')) {
-            // Inline math cannot sit inside a text run as a picture: use a plain-text form for
-            // trivial formulas, otherwise the TeX source (never lost, never doubled).
-            const src = this.mathByEl.get(el);
-            const simple = src ? simplifyTeX(src.tex) : null;
-            if (src && simple !== null) out.push({ ...st, text: simple, italics: true });
-            else if (src) out.push({ ...st, text: `$${src.tex}$`, monospace: true });
-            else out.push({ ...st, ...mathSpan(el, el.getAttribute('display') === 'true') });
+            out.push(this.mathItem(el, st));
             return;
         }
         if (!this.isInline(el)) {
