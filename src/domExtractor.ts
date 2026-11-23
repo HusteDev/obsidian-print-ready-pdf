@@ -1,6 +1,6 @@
 import {
     Align, CalloutNode, ContentNode, HeadingNode, ImageNode, InlineSpan, ListItem, ListNode,
-    PageBreakSyntax, TableCell, TableNode,
+    PAGEBREAK_SENTINEL, PageBreakSyntax, TableCell, TableNode,
 } from './types';
 
 /**
@@ -348,7 +348,7 @@ export class DomExtractor {
     private pushSpans(spans: InlineSpan[], out: ContentNode[], bc: BlockCtx): void {
         if (!spans.length) return;
         const para = (content: InlineSpan[]) => {
-            const cleaned = cleanSpans(content);
+            const cleaned = cleanSpans(content.map(x => x.text.includes(SENTINEL) ? { ...x, text: x.text.split(SENTINEL).join('') } : x));
             if (cleaned.length) out.push({ type: 'paragraph', content: cleaned, align: bc.align });
         };
         if (this.opts.pageBreakSyntax === 'callout') { para(spans); return; }
@@ -360,7 +360,7 @@ export class DomExtractor {
                 if (t) lines[lines.length - 1].push({ ...sp, text: t });
             });
         }
-        const isBreak = (l: InlineSpan[]) => /^={3,}$/.test(l.map(x => x.text).join('').trim());
+        const isBreak = (l: InlineSpan[]) => { const t = l.map(x => x.text).join('').trim(); return /^={3,}$/.test(t) || t === SENTINEL; };
         if (!lines.some(isBreak)) { para(spans); return; }
 
         let run: InlineSpan[] = [];
@@ -636,6 +636,8 @@ function mathSpan(el: HTMLElement, display: boolean): InlineSpan {
  * zero-width, soft-hyphen, bidi and control characters that would print as junk.
  * Code keeps tabs and newlines.
  */
+const SENTINEL = PAGEBREAK_SENTINEL;
+
 export function cleanText(text: string, keepWhitespace = false): string {
     const ctrl = keepWhitespace
         ? /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF\uFE00-\uFE0F]/g

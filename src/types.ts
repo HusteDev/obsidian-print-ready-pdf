@@ -187,3 +187,6 @@ export interface ImageNode {
     /** Set when the source could not be embedded; shown as a placeholder. */
     unresolvedReason?: string;
 }
+
+/** Placeholder paragraph text that stands in for a `===` page-break line during rendering. */
+export const PAGEBREAK_SENTINEL = 'PRPDF_PAGEBREAK_7f3a';

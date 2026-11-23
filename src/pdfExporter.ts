@@ -6,7 +6,7 @@ import {
 } from './types';
 import { DomExtractor, walkNodes } from './domExtractor';
 import { ImageLoader } from './images';
-import { renderNote } from './noteRenderer';
+import { renderNote, protectPageBreaks } from './noteRenderer';
 import { ExportProgress, yieldToUI } from './progress';
 import { applyFallbackFonts, FallbackResult } from './fallbackFonts';
 
@@ -199,7 +199,8 @@ export class PDFExporter {
 
     async exportNote(markdown: string, file: TFile, mode: ExportMode, progress?: ExportProgress): Promise<void> {
         await progress?.set('Rendering note…');
-        const rendered = await renderNote(this.app, markdown, file.path, this.contentWidth() * 96 / 72);
+        const source = this.settings.pageBreakSyntax === 'callout' ? markdown : protectPageBreaks(markdown);
+        const rendered = await renderNote(this.app, source, file.path, this.contentWidth() * 96 / 72);
         let nodes: ContentNode[];
         try {
             nodes = new DomExtractor({ pageBreakSyntax: this.settings.pageBreakSyntax }).extract(rendered.el);

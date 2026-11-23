@@ -1,7 +1,39 @@
 import { App, Component, MarkdownRenderer } from 'obsidian';
+import { PAGEBREAK_SENTINEL } from './types';
 
 const SETTLE_TIMEOUT_MS = 10_000;
 const QUIET_MS = 300;
+
+/**
+ * A line of 3+ `=` directly under a paragraph or list item is parsed as a setext H1
+ * underline. Replace such lines (outside frontmatter and fenced code) with a
+ * standalone sentinel paragraph so the extractor can emit a page break instead.
+ */
+export function protectPageBreaks(markdown: string): string {
+    const lines = markdown.split('\n');
+    let i = 0;
+    if (/^---\s*$/.test(lines[0] ?? '')) {
+        for (let j = 1; j < lines.length; j++) {
+            if (/^(---|\.\.\.)\s*$/.test(lines[j])) { i = j + 1; break; }
+        }
+    }
+    const out = lines.slice(0, i);
+    let fence: { ch: string; len: number } | null = null;
+    for (; i < lines.length; i++) {
+        const line = lines[i];
+        const f = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+        if (f) {
+            if (!fence) fence = { ch: f[1][0], len: f[1].length };
+            else if (f[1][0] === fence.ch && f[1].length >= fence.len && /^\s{0,3}(`+|~+)\s*$/.test(line)) fence = null;
+            out.push(line);
+        } else if (!fence && /^\s{0,3}={3,}\s*\r?$/.test(line)) {
+            out.push('', PAGEBREAK_SENTINEL, '');
+        } else {
+            out.push(line);
+        }
+    }
+    return out.join('\n');
+}
 
 const sleep = (ms: number) => new Promise<void>(r => window.setTimeout(r, ms));
 
