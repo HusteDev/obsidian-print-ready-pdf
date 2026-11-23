@@ -1,7 +1,7 @@
 {
     "id": "print-ready-pdf",
     "name": "Print-Ready PDF Export",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "minAppVersion": "1.8.7",
     "description": "Export notes to PDF with print-optimized or formatting-preserving modes, page-break controls and full layout customization.",
     "author": "HusteDev",
