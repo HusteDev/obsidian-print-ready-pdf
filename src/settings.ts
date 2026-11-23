@@ -18,7 +18,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Page size')
-            .setDesc('Standard paper size for exported PDF')
+            .setDesc('Paper size of the exported PDF.')
             .addDropdown(d => d
                 .addOptions({
                     LETTER:  'US Letter (8.5″ × 11″)',
@@ -81,7 +81,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Base font size (pt)')
-            .setDesc('Body text size. Heading sizes are fixed per export mode and do not change with this.')
+            .setDesc('Body text size. Heading sizes are fixed.')
             .addSlider(s => s
                 .setLimits(8, 18, 1)
                 .setValue(this.plugin.settings.baseFontSize)
@@ -94,7 +94,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Shrink code blocks to fit')
-            .setDesc('Reduce a code block\'s font size just enough that its longest line fits without wrapping, so the block keeps the line breaks you wrote.')
+            .setDesc('Reduce the font size so the longest line fits without wrapping.')
             .addToggle(t => t
                 .setValue(this.plugin.settings.codeShrinkToFit)
                 .onChange(async v => {
@@ -105,7 +105,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Minimum code font size (pt)')
-            .setDesc('Code blocks never shrink below this size; lines still too long at this size wrap.')
+            .setDesc('Longer lines wrap below this size.')
             .addSlider(s => s
                 .setLimits(5, 10, 0.5)
                 .setValue(this.plugin.settings.codeMinFontSize)
@@ -173,12 +173,12 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Page break syntax')
-            .setDesc('Which syntax triggers a hard page break during export.')
+            .setDesc('Which syntax forces a page break: a line with ===, a > [!page-break] callout, or both.')
             .addDropdown(d => d
                 .addOptions({
-                    both:          'Both styles (recommended)',
-                    'triple-equals': 'Triple equals (===) only',
-                    callout:       'Callout (> [!page-break]) only',
+                    both:          'Both (recommended)',
+                    'triple-equals': '=== only',
+                    callout:       'Callout only',
                 })
                 .setValue(this.plugin.settings.pageBreakSyntax)
                 .onChange(async v => {
@@ -204,11 +204,11 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Default export mode')
-            .setDesc('Used by the "Export to PDF (default mode)" command and menu entry. The other commands always use their own mode.')
+            .setDesc('Used by "Export to PDF (default mode)". Print optimized is a plain print layout; Preserve formatting keeps Obsidian\'s styling (callout colors, highlights, heading sizes). The other commands always use their own mode.')
             .addDropdown(d => d
                 .addOptions({
-                    print:    'Print optimized: clean white page with the plain print layout',
-                    preserve: 'Preserve formatting: keeps Obsidian styling (callout colors, highlights, heading sizes) on a white page',
+                    print:    'Print optimized',
+                    preserve: 'Preserve formatting',
                 })
                 .setValue(this.plugin.settings.defaultMode)
                 .onChange(async v => {
@@ -219,7 +219,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Print text in color')
-            .setDesc('Off by default: print mode renders all text, callouts, links and code in black and white. Turn on to print colors as displayed (callout colors, link blue, highlights, author colors) on a white page. Images are never converted.')
+            .setDesc('Print optimized is black and white by default. Turn on to print text colors as displayed. Images are never converted.')
             .addToggle(t => t
                 .setValue(this.plugin.settings.printInColor)
                 .onChange(async v => {
@@ -230,7 +230,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Dark page in preserve mode')
-            .setDesc('Off by default. Renders preserve-formatting exports with a dark page and light text, like Obsidian\'s dark theme. Uses a lot of ink; not recommended for printing.')
+            .setDesc('Dark page with light text. Uses a lot of ink.')
             .addToggle(t => t
                 .setValue(this.plugin.settings.preserveDarkPage)
                 .onChange(async v => {
@@ -252,7 +252,7 @@ export class PDFMakeSettingTab extends PluginSettingTab {
 
         new Setting(containerEl)
             .setName('Output folder')
-            .setDesc('Vault-relative folder for saved PDFs. Created if missing. Leave empty to save next to the exported note. Existing files are never overwritten; a number is appended instead.')
+            .setDesc('Vault folder for saved PDFs. Leave empty to save next to the note. Existing files are never overwritten.')
             .addText(t => t
                 .setPlaceholder('e.g. Exports/PDF')
                 .setValue(this.plugin.settings.outputFolder)
