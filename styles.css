@@ -43,3 +43,13 @@
 }
 
 .pdfmake-font-input { width: 280px; max-width: 100%; }
+
+/* Obsidian lays a diagram out for the width of its container and switches a
+   left-to-right flowchart to top-down when that is narrower than the diagram
+   and under 640px. The export host is only as wide as the PDF page, so give
+   diagrams a wide container to keep Obsidian's own layout; the exporter scales
+   the result down to the page width. */
+.pdfmake-render-host .mermaid {
+    width: 4000px !important;
+    max-width: none !important;
+}
