@@ -631,6 +631,27 @@ function labelLines(root: Element): string[] {
     return lines.map(l => l.trim()).filter(l => l !== '');
 }
 
+/** True when the diagram's own label text is light, i.e. it was drawn for a dark theme. */
+function hasLightText(svg: Element): boolean {
+    const lums: number[] = [];
+    const lum = (css: string) => {
+        const m = /^rgba?\(\s*(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)[ ,]+(\d+(?:\.\d+)?)/.exec(css.trim());
+        return m ? (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255 : null;
+    };
+    svg.querySelectorAll('foreignObject, text').forEach(n => {
+        const walker = document.createTreeWalker(n, NodeFilter.SHOW_TEXT);
+        const t = walker.nextNode();
+        const holder = t?.parentElement;
+        if (!holder || (t?.nodeValue ?? '').trim() === '') return;
+        const cs = getComputedStyle(holder);
+        const v = lum(n.tagName.toLowerCase() === 'text' ? cs.fill : cs.color);
+        if (v !== null) lums.push(v);
+    });
+    if (!lums.length) return false;
+    lums.sort((x, y) => x - y);
+    return lums[Math.floor(lums.length / 2)] > 0.6;
+}
+
 /**
  * Builds a self-contained copy of a rendered inline <svg>: computed styles are
  * written onto each element, <foreignObject> HTML labels become real <text>, the
@@ -640,7 +661,7 @@ function standaloneSvg(el: Element, w: number, h: number): string {
     const clone = el.cloneNode(true) as Element;
     const liveAll = [el, ...Array.from(el.querySelectorAll('*'))];
     const cloneAll = [clone, ...Array.from(clone.querySelectorAll('*'))];
-    const dark = document.body.classList.contains('theme-dark');
+    const dark = hasLightText(el);
     const fix = (prop: string, v: string) => (dark && COLOR_PROPS.has(prop) ? lightColor(v) : v);
 
     liveAll.forEach((live, i) => {
