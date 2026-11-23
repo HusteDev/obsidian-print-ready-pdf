@@ -1,6 +1,6 @@
 {
     "name": "print-ready-pdf",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Print-optimized or format-preserving PDF export for Obsidian, built on pdfmake",
     "main": "main.js",
     "scripts": {
