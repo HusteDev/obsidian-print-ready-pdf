@@ -326,8 +326,7 @@ export class DomExtractor {
         nodes.forEach(n => this.inline(n, {}, items));
         let spans: InlineSpan[] = [];
         const flush = () => {
-            const cleaned = cleanSpans(spans);
-            if (cleaned.length) out.push({ type: 'paragraph', content: cleaned, align: bc.align });
+            this.pushSpans(cleanSpans(spans), out, bc);
             spans = [];
         };
         for (const it of items) {
@@ -338,6 +337,40 @@ export class DomExtractor {
             } else spans.push(it);
         }
         flush();
+    }
+
+    /**
+     * Emits a run of spans as paragraphs. A line that is just `===` becomes a page
+     * break here as well as in the markdown post-processor: when the line follows an
+     * image or other inline content it sits inside a larger paragraph, which the
+     * post-processor never matches.
+     */
+    private pushSpans(spans: InlineSpan[], out: ContentNode[], bc: BlockCtx): void {
+        if (!spans.length) return;
+        const para = (content: InlineSpan[]) => {
+            const cleaned = cleanSpans(content);
+            if (cleaned.length) out.push({ type: 'paragraph', content: cleaned, align: bc.align });
+        };
+        if (this.opts.pageBreakSyntax === 'callout') { para(spans); return; }
+
+        const lines: InlineSpan[][] = [[]];
+        for (const sp of spans) {
+            sp.text.split('\n').forEach((t, i) => {
+                if (i > 0) lines.push([]);
+                if (t) lines[lines.length - 1].push({ ...sp, text: t });
+            });
+        }
+        const isBreak = (l: InlineSpan[]) => /^={3,}$/.test(l.map(x => x.text).join('').trim());
+        if (!lines.some(isBreak)) { para(spans); return; }
+
+        let run: InlineSpan[] = [];
+        const flushRun = () => { para(run); run = []; };
+        for (const l of lines) {
+            if (isBreak(l)) { flushRun(); out.push({ type: 'page_break' }); continue; }
+            if (run.length) run.push({ text: '\n' });
+            run.push(...l);
+        }
+        flushRun();
     }
 
     /** Flattens an element's inline content to spans (images and other blocks are dropped). */

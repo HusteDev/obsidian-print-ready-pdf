@@ -34,6 +34,23 @@ function isIgnorable(cp: number): boolean {
         || cp === 0x2060 || cp === 0xFEFF || (cp >= 0xE0100 && cp <= 0xE01EF);
 }
 
+/**
+ * Plain-ASCII stand-ins for common characters the standard fonts lack. Used only
+ * when no fallback font has the character, so "->" beats a bare "?".
+ */
+const ASCII_STAND_INS = new Map<number, string>([
+    [0x2192, '->'], [0x2190, '<-'], [0x2194, '<->'], [0x21D2, '=>'], [0x21D0, '<='], [0x21D4, '<=>'],
+    [0x2191, '^'], [0x2193, 'v'],
+    [0x2010, '-'], [0x2011, '-'], [0x2012, '-'], [0x2015, '-'], [0x2212, '-'], [0x2043, '-'], [0xFE63, '-'], [0xFF0D, '-'],
+    [0x2216, '\\'], [0x2215, '/'], [0x2044, '/'],
+    [0x2713, 'v'], [0x2714, 'v'], [0x2717, 'x'], [0x2718, 'x'], [0x2715, 'x'], [0x2716, 'x'],
+    [0x2264, '<='], [0x2265, '>='], [0x2260, '!='], [0x2248, '~='], [0x221E, 'inf'],
+    [0x2023, '>'], [0x25E6, 'o'], [0x25AA, '-'], [0x25CF, '*'], [0x25CB, 'o'],
+    [0x2009, ' '], [0x200A, ' '], [0x2008, ' '], [0x2007, ' '], [0x2006, ' '], [0x2005, ' '], [0x2004, ' '], [0x2003, ' '], [0x2002, ' '], [0x202F, ' '], [0x205F, ' '], [0x3000, ' '],
+    [0x2032, "'"], [0x2033, '"'], [0x201B, "'"], [0x201F, '"'], [0x2039, '<'], [0x203A, '>'],
+    [0x00AD, ''],
+]);
+
 // ── Minimal sfnt cmap reader ─────────────────────────────────────────────────
 
 export interface FontCoverage {
@@ -243,7 +260,11 @@ export async function applyFallbackFonts(app: App, docDef: any, paths: string[])
             if (isIgnorable(cp)) continue;
             if (BASE_FONTS.has(inherited) && !isBaseCovered(cp)) {
                 want = fontFor(cp);
-                if (!want) { missing.add(cp); out = '?'; }
+                if (!want) {
+                    const sub = ASCII_STAND_INS.get(cp);
+                    if (sub !== undefined) out = sub;
+                    else { missing.add(cp); out = '?'; }
+                }
             }
             if (want !== curFont) { flush(); curFont = want; }
             buf += out;

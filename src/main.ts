@@ -52,7 +52,7 @@ export default class PDFMakePlugin extends Plugin {
         // for === markers so users know where page breaks will land.
         this.registerMarkdownPostProcessor((el) => {
             el.querySelectorAll('p').forEach(p => {
-                if (this.settings.pageBreakSyntax !== 'callout' && p.textContent?.trim() === '===') {
+                if (this.settings.pageBreakSyntax !== 'callout' && p.children.length === 0 && p.textContent?.trim() === '===') {
                     p.addClass('pdfmake-page-break-marker');
                     p.textContent = '— Page Break —';
                 }
