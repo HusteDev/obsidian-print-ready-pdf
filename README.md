@@ -53,6 +53,21 @@ npm ci
 npm run build
 ```
 
+## Privacy and network use
+
+The plugin collects no telemetry and sends no note content anywhere. The only network requests it makes are downloads of remote images (`http://` and `https://` image URLs) that a note embeds, and only while a PDF is being exported. Everything else (rendering, math typesetting, fonts, PDF layout) runs locally. Remote images are also fetched by Obsidian's own renderer when it displays the note, as in Reading view.
+
 ## License
 
-MIT. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for bundled libraries.
+The plugin is released under the MIT license. See [LICENSE](LICENSE).
+
+## Attribution
+
+This plugin bundles the following open-source projects. Full licence texts and copyright lines are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+- [pdfmake](https://github.com/bpampuch/pdfmake) and [pdfkit](https://github.com/foliojs/pdfkit) (foliojs fork), MIT
+- [fontkit](https://github.com/foliojs/fontkit) (foliojs fork), MIT
+- [MathJax](https://github.com/mathjax/MathJax-src), Apache License 2.0
+- [woff2-encoder](https://github.com/itskyedo/woff2-encoder), MIT
+- [DejaVu Sans](https://dejavu-fonts.github.io/) (a small symbol subset), Bitstream Vera licence with public-domain DejaVu changes
+- Adobe core 14 font metrics (AFM, distributed with pdfkit), Adobe's permissive AFM license
