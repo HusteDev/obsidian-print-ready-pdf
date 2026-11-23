@@ -23,6 +23,7 @@
     },
     "dependencies": {
         "@foliojs-fork/pdfkit": "^0.15.3",
+        "mathjax-full": "3.2.2",
         "pdfmake": "^0.2.10",
         "woff2-encoder": "^2.0.0"
     }

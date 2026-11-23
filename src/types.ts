@@ -87,6 +87,7 @@ export type ContentNode =
     | PageBreakNode
     | HorizontalRuleNode
     | ImageNode
+    | MathNode
     | PlaceholderNode;
 
 export interface HeadingNode {
@@ -192,3 +193,14 @@ export interface ImageNode {
 
 /** Placeholder paragraph text that stands in for a `===` page-break line during rendering. */
 export const PAGEBREAK_SENTINEL = 'PRPDF_PAGEBREAK_7f3a';
+
+/** Display math. Typeset to SVG at export time; falls back to showing the source. */
+export interface MathNode {
+    type: 'math';
+    tex: string;
+    /** Visible stand-in used when the formula cannot be typeset. */
+    fallback: string;
+    svg?: string;
+    widthEx?: number;
+    heightEx?: number;
+}

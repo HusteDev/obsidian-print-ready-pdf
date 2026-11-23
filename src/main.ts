@@ -8,6 +8,7 @@ export default class PDFMakePlugin extends Plugin {
     settings: PDFMakeSettings;
     /** Single-flight guard: one export at a time. */
     private exporting = false;
+    private unloaded = false;
 
     async onload() {
         await this.loadSettings();
@@ -110,7 +111,7 @@ export default class PDFMakePlugin extends Plugin {
         const progress = new ExportProgress();
         try {
             const content = await this.readContent(file);
-            const exporter = new PDFExporter(this.app, this.settings);
+            const exporter = new PDFExporter(this.app, this.settings, () => this.unloaded);
             await exporter.exportNote(content, file, mode, progress);
         } catch (err: any) {
             console.error('[Print-Ready PDF]', err);
@@ -119,6 +120,11 @@ export default class PDFMakePlugin extends Plugin {
             progress.hide();
             this.exporting = false;
         }
+    }
+
+    onunload() {
+        // An in-flight export stops at its next checkpoint instead of writing after unload.
+        this.unloaded = true;
     }
 
     async loadSettings() {

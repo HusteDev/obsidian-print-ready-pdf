@@ -2,6 +2,7 @@ import {
     Align, CalloutNode, ContentNode, HeadingNode, ImageNode, InlineSpan, ListItem, ListNode,
     PAGEBREAK_SENTINEL, PageBreakSyntax, TableCell, TableNode,
 } from './types';
+import { MathSource, simplifyTeX } from './mathSource';
 
 /**
  * Converts Obsidian's rendered reading-view DOM into the ContentNode tree the
@@ -12,6 +13,8 @@ import {
 
 export interface ExtractOptions {
     pageBreakSyntax: PageBreakSyntax;
+    /** TeX recovered from the markdown, in document order (see mathSource.ts). */
+    mathSources?: MathSource[];
 }
 
 // ── Style state while walking inline content ─────────────────────────────────
@@ -63,7 +66,24 @@ export class DomExtractor {
 
     constructor(private opts: ExtractOptions) {}
 
+    private mathByEl = new Map<Element, MathSource>();
+
+    /** Pair rendered math elements with scanned sources, but only if the two lists clearly agree. */
+    private mapMath(root: HTMLElement): void {
+        const sources = this.opts.mathSources;
+        if (!sources || !sources.length) return;
+        const els = Array.from(root.querySelectorAll('.math'));
+        const agree = els.length === sources.length
+            && els.every((e, i) => e.classList.contains('math-block') === sources[i].display);
+        if (!agree) {
+            console.warn(`[Print-Ready PDF] Math scan found ${sources.length}, rendered ${els.length}; showing rendered text`);
+            return;
+        }
+        els.forEach((e, i) => this.mathByEl.set(e, sources[i]));
+    }
+
     extract(root: HTMLElement): ContentNode[] {
+        this.mapMath(root);
         const nodes = this.blocks(root, {});
         // Leading, trailing and doubled page breaks would produce blank pages.
         const out: ContentNode[] = [];
@@ -133,7 +153,9 @@ export class DomExtractor {
             return;
         }
         if (el.classList.contains('math-block')) {
-            out.push({ type: 'paragraph', content: [mathSpan(el, true)], align: 'center' });
+            const src = this.mathByEl.get(el);
+            if (src) out.push({ type: 'math', tex: src.tex, fallback: `$$${src.tex}$$` });
+            else out.push({ type: 'paragraph', content: [mathSpan(el, true)], align: 'center' });
             return;
         }
 
@@ -407,8 +429,13 @@ export class DomExtractor {
             return;
         }
         if (tag === 'MJX-CONTAINER' || el.classList.contains('math')) {
-            // Math is not typeset yet; show its source (or glyph text) so it is never lost or doubled.
-            out.push({ ...st, ...mathSpan(el, el.getAttribute('display') === 'true') });
+            // Inline math cannot sit inside a text run as a picture: use a plain-text form for
+            // trivial formulas, otherwise the TeX source (never lost, never doubled).
+            const src = this.mathByEl.get(el);
+            const simple = src ? simplifyTeX(src.tex) : null;
+            if (src && simple !== null) out.push({ ...st, text: simple, italics: true });
+            else if (src) out.push({ ...st, text: `$${src.tex}$`, monospace: true });
+            else out.push({ ...st, ...mathSpan(el, el.getAttribute('display') === 'true') });
             return;
         }
         if (!this.isInline(el)) {

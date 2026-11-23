@@ -6,6 +6,7 @@ The released `main.js` bundles the following open-source software. Each library'
 
 - [pdfmake](https://github.com/bpampuch/pdfmake) 0.2.x, MIT License. Its prebuilt browser build is bundled as one file and contains the libraries listed below.
 - [woff2-encoder](https://github.com/itskyedo/woff2-encoder) 2.x (WOFF2 decoder, WebAssembly build of Google's woff2 and brotli), MIT License
+- [MathJax](https://github.com/mathjax/MathJax-src) (`mathjax-full` 3.2.2, TeX input and SVG output with its bundled math fonts), Apache License 2.0
 - Adobe core 14 font metrics (AFM files for Helvetica and Courier), distributed with pdfkit under Adobe's permissive AFM license
 
 ## Contained in pdfmake's browser build

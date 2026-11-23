@@ -1,12 +1,13 @@
 import { formatPageNumber } from './pageNumbers';
 import { App, Notice, TFile, normalizePath } from 'obsidian';
 import {
-    Align, CalloutNode, ContentNode, ExportMode, ImageNode, InlineSpan, ListNode, PDFMakeSettings,
+    Align, CalloutNode, ContentNode, ExportMode, ImageNode, MathNode, InlineSpan, ListNode, PDFMakeSettings,
     TableNode,
 } from './types';
 import { DomExtractor, cleanText, walkNodes } from './domExtractor';
 import { ImageLoader } from './images';
 import { renderNote, protectPageBreaks } from './noteRenderer';
+import { scanMath } from './mathSource';
 import { ExportProgress, yieldToUI } from './progress';
 import { applyFallbackFonts, FallbackResult } from './fallbackFonts';
 
@@ -193,6 +194,7 @@ export class PDFExporter {
     constructor(
         private app: App,
         private settings: PDFMakeSettings,
+        private isCancelled: () => boolean = () => false,
     ) {
         this.images = new ImageLoader(app);
     }
@@ -203,11 +205,14 @@ export class PDFExporter {
         const rendered = await renderNote(this.app, source, file.path, this.contentWidth() * 96 / 72);
         let nodes: ContentNode[];
         try {
-            nodes = new DomExtractor({ pageBreakSyntax: this.settings.pageBreakSyntax }).extract(rendered.el);
+            nodes = new DomExtractor({ pageBreakSyntax: this.settings.pageBreakSyntax, mathSources: scanMath(source) }).extract(rendered.el);
         } finally {
             rendered.dispose();
         }
+        this.checkCancelled();
         await this.resolveImages(nodes, file.path, progress);
+        await this.resolveMath(nodes, progress);
+        this.checkCancelled();
 
         await progress?.set('Building PDF… (the app may pause briefly)');
         let buffer: Uint8Array;
@@ -223,8 +228,13 @@ export class PDFExporter {
             await yieldToUI();
             buffer = await this.render(nodes, mode);
         }
+        this.checkCancelled();
         await progress?.set('Saving PDF…');
         await this.saveBuffer(buffer, file, mode);
+    }
+
+    private checkCancelled(): void {
+        if (this.isCancelled()) throw new Error('Export cancelled');
     }
 
     private async render(nodes: ContentNode[], mode: ExportMode): Promise<Uint8Array> {
@@ -337,6 +347,29 @@ export class PDFExporter {
         const found: ImageNode[] = [];
         walkNodes(nodes, n => { if (n.type === 'image') found.push(n); });
         return found;
+    }
+
+    /** Typeset display math to SVG. Anything MathJax rejects keeps its TeX source as a visible fallback. */
+    private async resolveMath(nodes: ContentNode[], progress?: ExportProgress): Promise<void> {
+        const maths: MathNode[] = [];
+        walkNodes(nodes, n => { if (n.type === 'math') maths.push(n); });
+        if (!maths.length) return;
+        await progress?.set('Typesetting math…');
+        let typeset: typeof import('./math').typesetMath;
+        try {
+            typeset = (await import('./math')).typesetMath;
+        } catch (err) {
+            console.warn('[Print-Ready PDF] Math engine failed to load', err);
+            return;
+        }
+        for (const m of maths) {
+            try {
+                const r = typeset(m.tex, true);
+                if (r) { m.svg = r.svg; m.widthEx = r.widthEx; m.heightEx = r.heightEx; }
+            } catch (err) {
+                console.warn('[Print-Ready PDF] Could not typeset formula', m.tex, err);
+            }
+        }
     }
 
     private hasEmbeddedImages(nodes: ContentNode[]): boolean {
@@ -567,6 +600,25 @@ export class PDFExporter {
 
             case 'table':
                 return this.tableToContent(node, rc);
+
+            case 'math': {
+                if (!node.svg || !node.widthEx || !node.heightEx) {
+                    // Could not typeset: show the source rather than dropping the formula.
+                    return {
+                        text: node.fallback, font: 'Courier', fontSize: Math.max(8, fontSize - 2),
+                        alignment: 'center', marginTop: 2, marginBottom: 8,
+                    };
+                }
+                const exPt = fontSize / 2; // MathJax's ex is half an em
+                let w = node.widthEx * exPt;
+                let h = node.heightEx * exPt;
+                if (w > availWidth) { h *= availWidth / w; w = availWidth; }
+                const color = this.isDark(mode) ? '#dcddde' : mode === 'print' ? '#000000' : '#111111';
+                return {
+                    svg: node.svg.replace(/currentColor/g, color),
+                    width: w, height: h, alignment: 'center', marginTop: 4, marginBottom: 8,
+                };
+            }
 
             case 'page_break':
                 return { text: '', pageBreak: 'before' };
