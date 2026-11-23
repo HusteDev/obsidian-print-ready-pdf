@@ -188,13 +188,13 @@ async function readFontBytes(app: App, path: string): Promise<ArrayBuffer> {
     if (await app.vault.adapter.exists(vaultPath)) return app.vault.adapter.readBinary(vaultPath);
     if (Platform.isDesktopApp && /^([a-zA-Z]:[\\/]|\/|~)/.test(path)) {
         // Node built-ins exist only on desktop; this branch is guarded by Platform.isDesktopApp.
-        // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only Node API
-        const fs = require('fs') as typeof import('fs');
-        // eslint-disable-next-line @typescript-eslint/no-require-imports -- desktop-only Node API
-        const os = require('os') as typeof import('os');
+        const nodeRequire = (window as unknown as { require?: (id: string) => unknown }).require;
+        if (!nodeRequire) throw new Error('file not found');
+        const fs = nodeRequire('fs') as { promises: { readFile(file: string): Promise<Uint8Array> } };
+        const os = nodeRequire('os') as { homedir(): string };
         const real = path.startsWith('~') ? os.homedir() + path.slice(1) : path;
         const data = await fs.promises.readFile(real);
-        return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+        return new Uint8Array(data).buffer;
     }
     throw new Error('file not found');
 }

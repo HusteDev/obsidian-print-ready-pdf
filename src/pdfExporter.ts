@@ -457,7 +457,7 @@ export class PDFExporter {
         const normal = Math.max(8, fontSize - 2);
         if (!this.settings.codeShrinkToFit) return normal;
 
-        const longest = Math.max(0, ...code.split('\n').map(l => l.trimEnd().length));
+        const longest = Math.max(0, ...code.split('\n').map(l => l.replace(/\s+$/, '').length));
         if (longest === 0) return normal;
 
         const textWidth = availWidth - CODE_BLOCK_CHROME;
