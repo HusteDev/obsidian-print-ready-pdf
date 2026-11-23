@@ -2,6 +2,10 @@
 
 Export an Obsidian note to PDF with [pdfmake](https://github.com/bpampuch/pdfmake). Two modes, explicit page breaks, and full layout control.
 
+![Print-Ready PDF Export example](docs/example.gif)
+
+See the source and output: [example.md](docs/example.md) and [example.pdf](docs/example.pdf).
+
 **Desktop only** (Windows, macOS and Linux) for now. Mobile support may come later.
 
 ## Features
@@ -14,8 +18,6 @@ Export an Obsidian note to PDF with [pdfmake](https://github.com/bpampuch/pdfmak
 - Math: `$$…$$` display math is typeset and embedded as vector graphics; inline `$…$` math is converted to plain text where possible (see Limitations).
 - Code blocks: "Shrink code blocks to fit" (on by default) reduces the font size so the longest line fits without wrapping, down to "Minimum code font size" (6 pt by default); longer lines wrap below that. "Show code block language" (off by default) adds a header bar across the top of each fenced code block that has a language, showing the language name.
 - Exports never overwrite: if the file exists, a number is appended (`note-print (1).pdf`).
-
-<!-- TODO: capture docs/screenshot.png (settings tab and a sample exported PDF), then embed: ![Print-Ready PDF Export](docs/screenshot.png) -->
 
 ## Usage
 
