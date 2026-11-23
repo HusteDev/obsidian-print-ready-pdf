@@ -50,10 +50,10 @@ flowchart TD
 ## Images
 
 Full-page width (no width set)
-![](_attachments/Pasted%20image%2020261122203024.png)
+![](images/example-dog.jpg)
 
 Width set manually
-![350](_attachments/Pasted%20image%2020261122203108.png)
+![350](images/example-dog.jpg)
 
 ===
 ## Code with language labels
