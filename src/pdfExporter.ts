@@ -509,13 +509,18 @@ export class PDFExporter {
                 }
                 const label = this.settings.showCodeLanguage ? cleanText(node.language.trim()) : '';
                 const body: any[] = [];
+                const dark = this.isDark(mode);
+                const barBg = dark ? '#3b414d' : (this.isBw(mode) ? '#e0e0e0' : '#e4e6ea');
+                let barFg = dark ? '#f5f5f5' : (this.isBw(mode) ? '#000000' : '#111111');
+                if (!hasContrast(barFg, barBg)) barFg = dark ? '#ffffff' : '#000000';
                 if (label) {
                     body.push([{
                         text: label,
                         font: 'Courier',
-                        fontSize: 7.5,
-                        color: !this.isDark(mode) ? '#666666' : '#9aa3b2',
-                        margin: [8, 4, 8, 0],
+                        bold: true,
+                        fontSize: 9,
+                        color: barFg,
+                        margin: [8, 1, 8, 1],
                     }]);
                 }
                 chunks.forEach((text, i) => body.push([{
@@ -523,20 +528,20 @@ export class PDFExporter {
                     font: 'Courier',
                     fontSize: size,
                     color: codeColor,
-                    margin: [8, i === 0 ? (label ? 2 : 6) : 0, 8, i === chunks.length - 1 ? 6 : 0],
+                    margin: [8, i === 0 ? 6 : 0, 8, i === chunks.length - 1 ? 6 : 0],
                     preserveLeadingSpaces: true,
                 }]));
                 return {
                     table: { widths: ['*'], body },
                     layout: {
-                        fillColor: () => codeBg,
+                        fillColor: (i: number) => (label && i === 0 ? barBg : codeBg),
                         // Rules only around the whole block, not between row chunks.
-                        hLineWidth: (i: number, n: any) => (i === 0 || i === n.table.body.length ? 0.5 : 0),
+                        hLineWidth: (i: number, n: any) => (i === 0 || i === n.table.body.length || (label && i === 1) ? 0.5 : 0),
                         vLineWidth: () => 0.5,
                         hLineColor: () => borderCol,
                         vLineColor: () => borderCol,
-                        paddingTop: (i: number) => (i === 0 ? 4 : 0),
-                        paddingBottom: (i: number, n: any) => (i === n.table.body.length - 1 ? 4 : 0),
+                        paddingTop: (i: number) => (i === 0 ? (label ? 2 : 4) : 0),
+                        paddingBottom: (i: number, n: any) => (i === n.table.body.length - 1 ? 4 : (label && i === 0 ? 2 : 0)),
                     },
                     marginBottom: 8,
                     marginTop: 2,
