@@ -519,8 +519,10 @@ export class PDFExporter {
                         font: 'Courier',
                         bold: true,
                         fontSize: 9,
+                        // The document's 1.45 line height would add dead space below the glyphs.
+                        lineHeight: 1,
                         color: barFg,
-                        margin: [8, 1, 8, 1],
+                        margin: [8, 0, 8, 0],
                     }]);
                 }
                 chunks.forEach((text, i) => body.push([{
@@ -540,8 +542,8 @@ export class PDFExporter {
                         vLineWidth: () => 0.5,
                         hLineColor: () => borderCol,
                         vLineColor: () => borderCol,
-                        paddingTop: (i: number) => (i === 0 ? (label ? 2 : 4) : 0),
-                        paddingBottom: (i: number, n: any) => (i === n.table.body.length - 1 ? 4 : (label && i === 0 ? 2 : 0)),
+                        paddingTop: (i: number) => (i === 0 ? (label ? 3.5 : 4) : 0),
+                        paddingBottom: (i: number, n: any) => (i === n.table.body.length - 1 ? 4 : (label && i === 0 ? 2.5 : 0)),
                     },
                     marginBottom: 8,
                     marginTop: 2,
