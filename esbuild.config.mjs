@@ -30,7 +30,7 @@ const context = await esbuild.context({
     treeShaking: true,
     minify: prod,
     outfile: "main.js",
-    loader: { ".afm": "text" },
+    loader: { ".afm": "text", ".ttf": "binary" },
 });
 
 if (prod) {

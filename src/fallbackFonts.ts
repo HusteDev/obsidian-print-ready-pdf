@@ -12,6 +12,7 @@
 // and it works on mobile.
 import { App, Platform, TFile, normalizePath } from 'obsidian';
 import { toSfnt } from './woff';
+import symbolFont from './assets/SymbolsSubset.ttf';
 
 export const FONT_EXTENSIONS = ['ttf', 'otf', 'ttc', 'otc', 'woff', 'woff2'];
 
@@ -234,27 +235,43 @@ export async function applyFallbackFonts(app: App, docDef: any, paths: string[])
     const remaining = new Set(needed);
     const owner = new Map<number, string>();
 
+    // Registers `buf` as the next fallback font if it covers any still-missing character.
+    const register = (buf: ArrayBuffer, label: string): void => {
+        const cov = parseFontCoverage(buf);
+        const name = `Fallback${loaded.length}`;
+        let used = false;
+        for (const cp of remaining) {
+            if (cov.has(cp)) { owner.set(cp, name); remaining.delete(cp); used = true; }
+        }
+        if (!used) return;
+        const file = `fallback/${name}.${cov.isCollection ? 'ttc' : 'ttf'}`;
+        const spec: any = cov.isCollection ? [file, cov.psName] : file;
+        result.fonts[name] = { normal: spec, bold: spec, italics: spec, bolditalics: spec };
+        result.vfs[file] = buf;
+        loaded.push({ name, cov });
+        void label;
+    };
+
+    // User fonts come first, so they always win over the built-in symbol font.
     for (const raw of paths) {
         if (remaining.size === 0) break;
         const path = raw.trim();
         if (!path) continue;
         try {
-            const buf = await toSfnt(await readFontBytes(app, path));
-            const cov = parseFontCoverage(buf);
-            let used = false;
-            for (const cp of remaining) {
-                if (cov.has(cp)) { owner.set(cp, `Fallback${loaded.length}`); remaining.delete(cp); used = true; }
-            }
-            if (!used) continue;
-            const name = `Fallback${loaded.length}`;
-            const file = `fallback/${name}.${cov.isCollection ? 'ttc' : 'ttf'}`;
-            const spec: any = cov.isCollection ? [file, cov.psName] : file;
-            result.fonts[name] = { normal: spec, bold: spec, italics: spec, bolditalics: spec };
-            result.vfs[file] = buf;
-            loaded.push({ name, cov });
+            register(await toSfnt(await readFontBytes(app, path)), path);
         } catch (err) {
             const reason = err instanceof RangeError ? 'corrupt or unsupported font file' : err instanceof Error ? err.message : String(err);
             result.warnings.push(`Fallback font "${path}": ${reason.replace(/[\u0000-\u001F]/g, ' ')}`);
+        }
+    }
+
+    // Last resort before "?": the bundled Greek and math symbol subset.
+    if (remaining.size > 0) {
+        try {
+            const b = symbolFont;
+            register(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer, 'built-in symbols');
+        } catch (err) {
+            console.warn('[Print-Ready PDF] Built-in symbol font failed to load', err);
         }
     }
 
