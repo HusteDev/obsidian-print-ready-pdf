@@ -164,6 +164,8 @@ export interface ImageNode {
     /** Vault link path when `vault` is set, otherwise a URL. */
     src: string;
     vault: boolean;
+    /** URL Obsidian rendered for the <img>; fallback when the vault file can't be resolved by name. */
+    resourceUrl?: string;
     /** Serialized <svg> markup (diagrams); rasterized at load time. */
     svg?: string;
     /** Requested size in CSS pixels. */

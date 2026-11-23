@@ -59,6 +59,16 @@ export function toBase64(bytes: Uint8Array): string {
 /** An error whose message is safe to show in the PDF. Anything else becomes a generic reason. */
 class LoadError extends Error {}
 
+/** Collapses "." and ".." path segments (normalizePath does not). */
+function resolveDots(path: string): string {
+    const out: string[] = [];
+    for (const seg of path.split('/')) {
+        if (seg === '' || seg === '.') continue;
+        if (seg === '..') out.pop(); else out.push(seg);
+    }
+    return out.join('/');
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
     let timer = 0;
     const timeout = new Promise<never>((_, reject) => {
@@ -114,9 +124,15 @@ export class ImageLoader {
     private async readBytes(img: ImageNode, sourcePath: string): Promise<{ bytes: Uint8Array; hint: string }> {
         if (img.vault) {
             const file = this.resolveVaultFile(img.src, sourcePath);
-            if (!file) throw new LoadError('not found');
-            const bytes = new Uint8Array(await this.app.vault.readBinary(file));
-            return { bytes, hint: mimeForExt(file.extension) };
+            if (file) {
+                const bytes = new Uint8Array(await this.app.vault.readBinary(file));
+                return { bytes, hint: mimeForExt(file.extension) };
+            }
+            // Not resolvable by name: use the resource URL Obsidian itself rendered.
+            if (!img.resourceUrl) throw new LoadError('not found');
+            const res = await fetch(img.resourceUrl);
+            if (!res.ok) throw new LoadError('not found');
+            return { bytes: new Uint8Array(await res.arrayBuffer()), hint: res.headers.get('content-type') ?? '' };
         }
         const src = img.src;
         if (src.startsWith('data:')) {
@@ -137,13 +153,20 @@ export class ImageLoader {
     }
 
     private resolveVaultFile(link: string, sourcePath: string): TFile | null {
-        const linkPath = decodeSafe(link.split('#')[0]);
+        // Links may be percent-encoded ("Pasted%20image.png") and may carry #fragments or |size.
+        const linkPath = decodeSafe(link.split('#')[0].split('|')[0]).trim();
         const sourceFolder = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : '';
-        let file: unknown = this.app.metadataCache.getFirstLinkpathDest(linkPath, sourcePath);
-        if (!(file instanceof TFile)) {
-            file = this.app.vault.getAbstractFileByPath(normalizePath(`${sourceFolder}/${linkPath}`));
+        const candidates = [
+            linkPath,
+            linkPath.replace(/^\/+/, ''),
+            resolveDots(`${sourceFolder}/${linkPath}`),
+        ];
+        for (const c of candidates) {
+            const f = this.app.metadataCache.getFirstLinkpathDest(c, sourcePath)
+                ?? this.app.vault.getAbstractFileByPath(normalizePath(c));
+            if (f instanceof TFile) return f;
         }
-        return file instanceof TFile ? file : null;
+        return null;
     }
 
     /** Decode with the browser and re-encode as PNG. */

@@ -463,6 +463,7 @@ export class DomExtractor {
             alt: img.getAttribute('alt') ?? '',
             src: linkSrc ?? img.getAttribute('src') ?? '',
             vault: linkSrc !== null,
+            resourceUrl: linkSrc !== null ? (img.getAttribute('src') ?? undefined) : undefined,
             width: widthPct ? undefined : pick('width'),
             height: pick('height'),
             widthPct,
