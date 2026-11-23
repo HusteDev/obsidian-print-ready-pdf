@@ -12,9 +12,10 @@ function tag(v: DataView, o: number): string {
 }
 
 async function inflate(data: Uint8Array): Promise<Uint8Array> {
-    const DS = (globalThis as any).DecompressionStream;
-    if (!DS) throw new Error('WOFF needs DecompressionStream, which this device lacks; use a .ttf/.otf file');
-    const stream = new Blob([data]).stream().pipeThrough(new DS('deflate'));
+    if (typeof window.DecompressionStream === 'undefined') {
+        throw new Error('WOFF needs DecompressionStream, which this device lacks; use a .ttf/.otf file');
+    }
+    const stream = new Blob([new Uint8Array(data)]).stream().pipeThrough(new window.DecompressionStream('deflate'));
     return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 

@@ -177,7 +177,7 @@ export class ImageLoader {
         const isSvgSrc = type === 'image/svg+xml';
         const url = isSvgSrc
             ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new TextDecoder().decode(bytes))}`
-            : URL.createObjectURL(new Blob([bytes], { type }));
+            : URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type }));
         try {
             const el = new Image();
             el.decoding = 'async';
