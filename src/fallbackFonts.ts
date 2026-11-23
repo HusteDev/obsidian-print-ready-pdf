@@ -1,15 +1,15 @@
 // Unicode fallback fonts.
 //
 // pdfmake's built-in fonts (Helvetica, Courier) cover only WinAnsi, so CJK,
-// Cyrillic, Greek, arrows, symbols etc. cannot render. Nothing is bundled
-// (fonts are many MB); instead the user points the plugin at font files in the
-// vault (or, on desktop, anywhere on disk). At export time we:
+// Cyrillic, Greek, arrows, symbols etc. cannot render. Only a small symbol
+// subset is bundled (fonts are many MB); otherwise the user points the plugin at
+// font files in the vault (or anywhere on disk). At export time we:
 //   1. collect the characters in the document that the base fonts can't draw,
 //   2. load fallback fonts (in order) only if such characters exist,
 //   3. split the affected text runs so each character uses the first fallback
 //      font that has a glyph for it, and register those fonts with pdfmake.
 // Coverage is checked with a small cmap reader, so no font library is needed
-// and it works on mobile.
+// and it stays lightweight.
 import { App, Platform, TFile, normalizePath } from 'obsidian';
 import { toSfnt } from './woff';
 import symbolFont from './assets/SymbolsSubset.ttf';

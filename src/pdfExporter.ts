@@ -12,7 +12,7 @@ import { ExportProgress, yieldToUI } from './progress';
 import { applyFallbackFonts, FallbackResult } from './fallbackFonts';
 
 // pdfmake and its font data are large; load them only when an export runs so
-// they don't slow down Obsidian (especially mobile) startup.
+// they don't slow down Obsidian startup.
 //
 // pdfmake 0.2's getBuffer() has no error callback: a failure inside its
 // font/layout promise chain becomes an unhandled rejection and the callback
