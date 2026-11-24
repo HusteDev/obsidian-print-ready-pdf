@@ -1,6 +1,6 @@
 import { MarkdownView, Notice, Plugin, TFile } from 'obsidian';
 import { PDFMakeSettings, DEFAULT_SETTINGS, ExportMode } from './types';
-import { PDFExporter } from './pdfExporter';
+import { ExportOptions, PDFExporter } from './pdfExporter';
 import { PDFMakeSettingTab } from './settings';
 import { ExportProgress } from './progress';
 
@@ -9,16 +9,18 @@ export default class PDFMakePlugin extends Plugin {
     /** Single-flight guard: one export at a time. */
     private exporting = false;
     private unloaded = false;
+    private ribbonEl: HTMLElement | null = null;
 
     async onload() {
         await this.loadSettings();
+        this.updateRibbon();
 
         this.addCommand({
             id: 'export-pdf',
             name: 'Export to PDF (default mode)',
             checkCallback: (checking) => {
                 if (this.app.workspace.getActiveViewOfType(MarkdownView)?.file) {
-                    if (!checking) void this.exportCurrentFile(this.settings.defaultMode);
+                    if (!checking) void this.exportCurrentFile(this.settings.defaultMode, true);
                     return true;
                 }
                 return false;
@@ -49,6 +51,16 @@ export default class PDFMakePlugin extends Plugin {
             },
         });
 
+        this.addCommand({
+            id: 'export-selection-pdf',
+            name: 'Export selection to PDF',
+            editorCheckCallback: (checking, editor, view) => {
+                if (!view.file || !editor.somethingSelected()) return false;
+                if (!checking) void this.exportFile(view.file, this.settings.defaultMode, { markdown: editor.getSelection(), selection: true, useNoteMode: true });
+                return true;
+            },
+        });
+
         // Show a visual "— Page Break —" indicator in reading/preview mode
         // for === markers so users know where page breaks will land.
         this.registerMarkdownPostProcessor((el) => {
@@ -61,13 +73,24 @@ export default class PDFMakePlugin extends Plugin {
         });
 
         this.registerEvent(
+            this.app.workspace.on('editor-menu', (menu, editor, view) => {
+                const file = view.file;
+                if (!file || !editor.somethingSelected()) return;
+                menu.addItem(item => item
+                    .setTitle('Print-ready PDF: export selection')
+                    .setIcon('file-down')
+                    .onClick(() => this.exportFile(file, this.settings.defaultMode, { markdown: editor.getSelection(), selection: true, useNoteMode: true })));
+            })
+        );
+
+        this.registerEvent(
             this.app.workspace.on('file-menu', (menu, file, source) => {
                 if (!['more-options', 'file-explorer-context-menu'].includes(source) || !(file instanceof TFile) || file.extension !== 'md') return;
                 menu.addSeparator();
                 menu.addItem(item => item
                     .setTitle('Print-ready PDF: export (default mode)')
                     .setIcon('file-down')
-                    .onClick(() => this.exportFile(file, this.settings.defaultMode)));
+                    .onClick(() => this.exportFile(file, this.settings.defaultMode, { useNoteMode: true })));
                 menu.addItem(item => item
                     .setTitle('Print-ready PDF: export (print optimized)')
                     .setIcon('printer')
@@ -82,13 +105,23 @@ export default class PDFMakePlugin extends Plugin {
         this.addSettingTab(new PDFMakeSettingTab(this.app, this));
     }
 
-    private async exportCurrentFile(mode: ExportMode): Promise<void> {
+    private async exportCurrentFile(mode: ExportMode, useNoteMode = false): Promise<void> {
         const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
         if (!file) {
             new Notice('No active Markdown file');
             return;
         }
-        await this.exportFile(file, mode);
+        await this.exportFile(file, mode, { useNoteMode });
+    }
+
+    /** Adds or removes the ribbon icon to match the setting. */
+    updateRibbon(): void {
+        this.ribbonEl?.remove();
+        this.ribbonEl = null;
+        if (!this.settings.showRibbonIcon) return;
+        this.ribbonEl = this.addRibbonIcon('file-down', 'Export to PDF', () => {
+            void this.exportCurrentFile(this.settings.defaultMode, true);
+        });
     }
 
     /** Prefer the live editor buffer (unsaved edits) over the file on disk. */
@@ -102,7 +135,7 @@ export default class PDFMakePlugin extends Plugin {
         return this.app.vault.read(file);
     }
 
-    private async exportFile(file: TFile, mode: ExportMode): Promise<void> {
+    private async exportFile(file: TFile, mode: ExportMode, opts: ExportOptions & { markdown?: string } = {}): Promise<void> {
         if (this.exporting) {
             new Notice('A PDF export is already running');
             return;
@@ -110,9 +143,9 @@ export default class PDFMakePlugin extends Plugin {
         this.exporting = true;
         const progress = new ExportProgress();
         try {
-            const content = await this.readContent(file);
+            const content = opts.markdown ?? await this.readContent(file);
             const exporter = new PDFExporter(this.app, this.settings, () => this.unloaded);
-            await exporter.exportNote(content, file, mode, progress);
+            await exporter.exportNote(content, file, mode, progress, { selection: opts.selection, useNoteMode: opts.useNoteMode });
         } catch (err: unknown) {
             console.error('[Print-Ready PDF]', err);
             new Notice(`PDF export failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -130,6 +163,8 @@ export default class PDFMakePlugin extends Plugin {
     async loadSettings() {
         const saved = (await this.loadData()) as Partial<PDFMakeSettings> | null;
         this.settings = Object.assign({}, DEFAULT_SETTINGS, saved);
+        // Saved data from older versions lacks some keys of the nested object.
+        this.settings.metadataKeys = { ...DEFAULT_SETTINGS.metadataKeys, ...saved?.metadataKeys };
     }
 
     async saveSettings() {
