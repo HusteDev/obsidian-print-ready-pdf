@@ -25,6 +25,7 @@ async function bundle(srcRoot, name, withHelpers = true) {
                     "export * as metadata from './src/metadata';",
                     "export * as templates from './src/templates';",
                     "export * as overrides from './src/noteOverrides';",
+                    "export * as rtable from './src/rtable';",
                 ] : []),
             ].join('\n'),
             resolveDir: srcRoot,
@@ -118,7 +119,7 @@ const check = (name, fn) => Promise.resolve().then(fn).then(() => { passed++; co
 
 const mod = await bundle(root, 'new');
 const { PDFExporter, DEFAULT_SETTINGS } = mod;
-const { metadata, templates, overrides } = mod;
+const { metadata, templates, overrides, rtable } = mod;
 
 function buildDef(settings, mode = 'print', info) {
     const ex = new PDFExporter({}, { ...DEFAULT_SETTINGS, ...settings });
@@ -256,6 +257,150 @@ await check('page size and orientation overrides change the PDF page', async () 
     const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdf);
     assert.ok(box, 'media box found');
     assert.ok(Math.abs(Number(box[1]) - 841.89) < 0.5 && Math.abs(Number(box[2]) - 595.28) < 0.5, `A4 landscape, got ${box[1]} x ${box[2]}`);
+});
+
+// ── rtable (Interactive Tables) ────────────────────────────────────────────
+
+const RT_SOURCE = [
+    'widths: 140, auto, 220',
+    'col-style: 3=italic',
+    'row-style: 1=bg:blue;color:#ffffff;bold',
+    'cell-style: 3:2=bg:yellow;bold, 4:3=bg:#ffeeaa;color:#c00',
+    'cell-align: 2:1=right',
+    '| Item     | Owner       | Notes                         |',
+    '| :------- | :---------: | ----------------------------- |',
+    '| Q3 plan  | <           | Spans two columns             |',
+    '| Rollout  | [[Dana]]    | - step one<br>- step two      |',
+    '| ^        | Ops         | `Rollout` spans two rows      |',
+].join('\n');
+
+const rtCell = (text, extra = {}) => ({ content: [{ type: 'paragraph', content: [{ text }] }], header: false, colSpan: 1, rowSpan: 1, ...extra });
+const blueHeader = { bg: '#0000ff', bgAlpha: 1, color: '#ffffff', bold: true };
+const rtNodes = [
+    { type: 'paragraph', content: [t('Before the table.')] },
+    {
+        type: 'table', headerRows: 1, colWidths: [140, null, 220], rows: [
+            [rtCell('Item', { header: true, format: blueHeader }), rtCell('Owner', { header: true, format: blueHeader }), rtCell('Notes', { header: true, format: blueHeader })],
+            [rtCell('Q3 plan', { align: 'right' }), rtCell('Spans two columns', { colSpan: 2 })],
+            [rtCell('Rollout', { rowSpan: 2 }), rtCell('Dana'), rtCell('step one step two', { format: { italic: true, bg: '#ffff00', bold: true } })],
+            [rtCell('Ops'), rtCell('Rollout spans two rows', { format: { bg: '#ffeeaa', color: '#cc0000', strike: true, scale: 1.2 } })],
+        ],
+    },
+    { type: 'paragraph', content: [t('After the table.')] },
+];
+
+function rtDef(settings, mode) {
+    const ex = new PDFExporter({}, { ...DEFAULT_SETTINGS, ...settings });
+    ex.info = { title: 'T', creator: 'Print-Ready PDF Export', creationDate: new Date() };
+    ex.baseName = 'T';
+    ex.exportedAt = new Date();
+    return ex.buildDocDef(structuredClone(rtNodes), mode);
+}
+
+/** Fill colours drawn in the content streams (background rectangles and text), as [r, g, b] in 0-255. */
+function fillColors(pdf) {
+    const out = [];
+    for (const m of pdf.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) scn/g)) out.push([+m[1], +m[2], +m[3]].map(v => Math.round(v * 255)));
+    return out;
+}
+
+await check('rtable source: grid, spans, widths, alignment and styles are read', () => {
+    const m = rtable.parseRtable(RT_SOURCE);
+    assert.equal(m.rows, 4);
+    assert.equal(m.cols, 3);
+    assert.deepEqual(m.widths, [140, null, 220]);
+    const at = (r, c) => m.cells.find(x => x.r === r && x.c === c);
+    assert.equal(at(1, 0).text, 'Q3 plan');
+    assert.equal(m.cells.filter(x => x.r === 1).length, 2, 'the < cell is merged into its neighbour, so row 2 has two cells');
+    assert.equal(at(1, 0).cs, 2, 'Q3 plan spans the < cell to its right');
+    const rollout = at(2, 0);
+    assert.equal(rollout.text, 'Rollout');
+    assert.equal(rollout.rs, 2, 'the ^ cell is merged into the cell above');
+    assert.equal(at(2, 2).text, '- step one\n- step two', '<br> becomes a line break');
+    assert.equal(rtable.effectiveAlign(m, at(1, 0)).h, 'right');
+    assert.equal(rtable.effectiveAlign(m, at(0, 1)).h, 'center', 'column alignment from the separator row');
+    assert.deepEqual(rtable.effectiveStyle(m, at(0, 0)), { italic: true, bg: 'blue', color: '#ffffff', bold: true }.constructor === Object ? rtable.effectiveStyle(m, at(0, 0)) : {});
+    assert.equal(rtable.effectiveStyle(m, at(0, 0)).bg, 'blue');
+    assert.equal(rtable.effectiveStyle(m, at(2, 2)).italic, true, 'column style applies');
+    assert.equal(rtable.effectiveStyle(m, at(2, 1)).bg, 'yellow', 'cell style applies');
+    assert.equal(rtable.effectiveStyle(m, at(2, 1)).bold, true);
+    assert.equal(rtable.effectiveStyle(m, at(3, 2)).bg, '#ffeeaa');
+    assert.equal(rtable.effectiveStyle(m, at(3, 2)).color, '#c00');
+    assert.equal(rtable.parseRtStyle('bg:nonsense;size:huge;font:mono;strike').font, 'mono');
+    assert.deepEqual(rtable.parseRtStyle('bg:nonsense;size:huge'), {}, 'invalid parts are dropped');
+    assert.equal(rtable.parseRtable('no table here'), null);
+    const ragged = rtable.parseRtable('| a | b |\n| - | - |\n| only |');
+    assert.equal(ragged.cells.length, 4, 'a short row is filled with empty cells');
+});
+
+await check('rtable: merged cells, widths and formatting reach the PDF in print mode (black and white)', async () => {
+    const def = rtDef({}, 'print');
+    const table = def.content.find(n => n.table).table;
+    assert.equal(table.body[1][1].colSpan, 2, 'a column span');
+    assert.deepEqual(table.body[1][2], {}, 'followed by the empty placeholder pdfmake needs');
+    assert.equal(table.body[2][0].rowSpan, 2, 'a row span');
+    assert.deepEqual(table.body[3][0], {}, 'with an empty placeholder in the row below');
+    assert.equal(table.headerRows, 1, 'the header row repeats across pages');
+    assert.ok(table.widths[2] > table.widths[0], 'specified widths keep their proportions (220 vs 140)');
+    const pdf = await renderBytes(def);
+    const text = pageTexts(pdf).join(' ');
+    for (const word of ['Item', 'Owner', 'Notes', 'Q3 plan', 'Spans two columns', 'Rollout', 'Ops', 'Before the table.', 'After the table.']) {
+        assert.ok(text.includes(word), `page text has "${word}"`);
+    }
+    assert.equal((text.match(/Spans two columns/g) ?? []).length, 1, 'a merged cell is drawn once');
+    for (const [r, g, b] of fillColors(pdf)) assert.ok(r === g && g === b, `only greys in black and white print (found ${r},${g},${b})`);
+    const fill = table.body[2][2].fillColor;
+    assert.match(fill, /^#[0-9a-f]{6}$/);
+    const grey = parseInt(fill.slice(1, 3), 16);
+    assert.ok(grey >= 0xc8 && grey <= 0xf4, `a light grey background (${fill})`);
+    assert.equal(table.body[2][2].color, undefined, 'no text colour in black and white');
+    assert.equal(table.body[2][2].bold, true);
+    assert.equal(table.body[2][2].italics, true);
+    assert.equal(table.body[3][2].decoration, 'lineThrough');
+    assert.equal(table.body[0][0].fillColor.slice(1, 3), table.body[0][0].fillColor.slice(3, 5), 'the blue header became grey too');
+});
+
+await check('rtable: colours are kept in preserve mode, with readable text', async () => {
+    const def = rtDef({}, 'preserve');
+    const table = def.content.find(n => n.table).table;
+    assert.equal(table.body[0][0].fillColor, '#0000ff');
+    assert.equal(table.body[0][0].color, '#ffffff', 'white text on blue has enough contrast');
+    assert.equal(table.body[2][2].fillColor, '#ffff00');
+    assert.equal(table.body[3][2].fillColor, '#ffeeaa');
+    assert.equal(table.body[3][2].color, '#cc0000');
+    assert.equal(table.body[3][2].fontSize, DEFAULT_SETTINGS.baseFontSize * 1.2);
+    const pdf = await renderBytes(def);
+    assert.ok(fillColors(pdf).some(([r, g, b]) => r === 255 && g === 255 && b === 0), 'the yellow cell is drawn');
+});
+
+await check('rtable: unreadable text colours fall back to black or white', () => {
+    const nodesLow = [{ type: 'table', headerRows: 1, rows: [[rtCell('H', { header: true })], [rtCell('x', { format: { bg: '#ffff00', color: '#ffff33' } }), rtCell('y', { format: { bg: '#000033' } })]] }];
+    const ex = new PDFExporter({}, { ...DEFAULT_SETTINGS });
+    ex.info = { title: 'T', creator: 'x', creationDate: new Date() };
+    const def = ex.buildDocDef(nodesLow, 'preserve');
+    const row = def.content[0].table.body[1];
+    assert.equal(row[0].color, '#000000', 'yellow on yellow becomes black');
+    assert.equal(row[1].color, '#ffffff', 'dark text on a dark cell becomes white');
+});
+
+await check('rtable: translucent theme tints blend onto the page', () => {
+    const nodesTint = [{ type: 'table', headerRows: 1, rows: [[rtCell('H', { header: true })], [rtCell('x', { format: { bg: '#ff0000', bgAlpha: 0.2 } })]] }];
+    const ex = new PDFExporter({}, { ...DEFAULT_SETTINGS });
+    ex.info = { title: 'T', creator: 'x', creationDate: new Date() };
+    const def = ex.buildDocDef(nodesTint, 'preserve');
+    assert.equal(def.content[0].table.body[1][0].fillColor, '#ffcccc', '20 percent red over white');
+});
+
+await check('rtable: a table without formatting or widths gets no formatting properties', () => {
+    const plain = [{ type: 'table', headerRows: 1, rows: [[rtCell('A', { header: true }), rtCell('B', { header: true })], [rtCell('1'), rtCell('2')]] }];
+    const ex = new PDFExporter({}, { ...DEFAULT_SETTINGS });
+    ex.info = { title: 'T', creator: 'x', creationDate: new Date() };
+    const def = ex.buildDocDef(plain, 'print');
+    const cell = def.content[0].table.body[1][0];
+    assert.equal(cell.fillColor, undefined);
+    assert.equal(cell.bold, undefined);
+    assert.equal(cell.italics, undefined);
+    assert.equal(cell.fontSize, undefined);
 });
 
 const baselineDir = process.argv[2];

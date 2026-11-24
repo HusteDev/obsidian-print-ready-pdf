@@ -17,6 +17,7 @@ See the source and output: [example.md](docs/example.md) and [example.pdf](docs/
 - Page size (Letter, A4, Legal, Tabloid, A3, A5), orientation, margins, font size and page-number style (1, 1 of 10, 1 / 10, Page 1, Page 1 of 10, – 1 –; left, center or right) are set in the plugin's settings.
 - Math: `$$…$$` display math is typeset and embedded as vector graphics; inline `$…$` math is converted to plain text where possible (see Limitations).
 - Code blocks: "Shrink code blocks to fit" (on by default) reduces the font size so the longest line fits without wrapping, down to "Minimum code font size" (6 pt by default); longer lines wrap below that. "Show code block language" (off by default) adds a header bar across the top of each fenced code block that has a language, showing the language name.
+- Tables from the [Interactive Tables](https://github.com/HusteDev/obsidian-interactive-tables) plugin (`rtable` code blocks) become real PDF tables, with merged cells, column widths, cell colors and formatting. This works with or without that plugin installed; see [docs/rtable-example.md](docs/rtable-example.md).
 - PDF metadata: the title, author, subject and keywords are written into the PDF from frontmatter properties you choose, with auto-fill rules (see PDF metadata below).
 - Optional table of contents, header and footer text (`{title}`, `{date}`, `{page}`, `{pages}`, `{mode}`), a first page number and hiding the number on the first page.
 - Body font: sans (Helvetica, the default) or serif (Times). Code stays in Courier.
