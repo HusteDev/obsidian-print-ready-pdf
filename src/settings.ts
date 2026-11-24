@@ -1,4 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
+import { META_FIELDS, META_FIXED_INFO } from './metadata';
+import { NOTE_KEYS } from './noteOverrides';
+import { BodyFont } from './types';
 import type PDFMakePlugin from './main';
 import type { PDFMakeSettings } from './types';
 import { PAGE_NUMBER_FORMATS } from './pageNumbers';
@@ -89,6 +92,18 @@ export class PDFMakeSettingTab extends PluginSettingTab {
                 .setDynamicTooltip()
                 .onChange(async v => {
                     this.plugin.settings.baseFontSize = v;
+                    await this.plugin.saveSettings();
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('Body font')
+            .setDesc('Both fonts are built into every PDF viewer, so nothing is embedded. Code always stays in a monospace font.')
+            .addDropdown(d => d
+                .addOptions({ sans: 'Sans (Helvetica)', serif: 'Serif (Times)' })
+                .setValue(this.plugin.settings.bodyFont)
+                .onChange(async v => {
+                    this.plugin.settings.bodyFont = v as BodyFont;
                     await this.plugin.saveSettings();
                 })
             );
@@ -210,6 +225,144 @@ export class PDFMakeSettingTab extends PluginSettingTab {
         li2.createEl('code', { text: '> [!page-break]' });
         li2.appendText(' — renders as an ordinary callout in Obsidian (no page-break marker); the break happens only in the exported PDF');
 
+        // ── Table of contents ────────────────────────────────────────────────
+
+        new Setting(containerEl).setName('Table of contents').setHeading();
+
+        new Setting(containerEl)
+            .setName('Add a table of contents')
+            .setDesc(`Lists the headings with page numbers on its own first page. A note can turn it on or off with the ${NOTE_KEYS.toc} property.`)
+            .addToggle(t => t
+                .setValue(this.plugin.settings.includeToc)
+                .onChange(async v => {
+                    this.plugin.settings.includeToc = v;
+                    await this.plugin.saveSettings();
+                    this.display();
+                })
+            );
+
+        if (this.plugin.settings.includeToc) {
+            new Setting(containerEl)
+                .setName('Heading levels')
+                .setDesc('The deepest heading level listed.')
+                .addDropdown(d => d
+                    .addOptions({ '1': 'Level 1 only', '2': 'Levels 1 to 2', '3': 'Levels 1 to 3' })
+                    .setValue(String(this.plugin.settings.tocMaxLevel))
+                    .onChange(async v => {
+                        this.plugin.settings.tocMaxLevel = Number(v) as 1 | 2 | 3;
+                        await this.plugin.saveSettings();
+                    })
+                );
+
+            new Setting(containerEl)
+                .setName('Title')
+                .setDesc('Heading above the table of contents. Leave empty for none.')
+                .addText(t => t
+                    .setPlaceholder('Contents')
+                    .setValue(this.plugin.settings.tocTitle)
+                    .onChange(async v => {
+                        this.plugin.settings.tocTitle = v;
+                        await this.plugin.saveSettings();
+                    })
+                );
+        }
+
+        // ── Headers and footers ──────────────────────────────────────────────
+
+        new Setting(containerEl).setName('Headers and footers').setHeading();
+        const hfInfo = containerEl.createDiv({ cls: 'pdfmake-info-box' });
+        hfInfo.createEl('p', { text: 'Each of the six fields is optional. Leave all header fields empty for no header. You can use these variables:' });
+        const hfList = hfInfo.createEl('ul');
+        for (const [name, what] of [
+            ['{title}', 'the PDF title (see PDF metadata below)'],
+            ['{date}', 'the export date, YYYY-MM-DD'],
+            ['{page}', 'the page number as printed (see the first page number setting below)'],
+            ['{pages}', 'the last page number as printed'],
+            ['{mode}', 'print or preserve'],
+        ]) {
+            const li = hfList.createEl('li');
+            li.createEl('code', { text: name });
+            li.appendText(` ${what}`);
+        }
+        hfInfo.createEl('p', { text: 'The page number options below still work. If footer text shares a position with the page number, the text comes first, then a dot, then the number. Characters that the built-in fonts lack become a plain stand-in or a question mark.' });
+
+        const hfFields: { key: 'headerLeft' | 'headerCenter' | 'headerRight' | 'footerLeft' | 'footerCenter' | 'footerRight'; name: string }[] = [
+            { key: 'headerLeft', name: 'Header, left' },
+            { key: 'headerCenter', name: 'Header, center' },
+            { key: 'headerRight', name: 'Header, right' },
+            { key: 'footerLeft', name: 'Footer, left' },
+            { key: 'footerCenter', name: 'Footer, center' },
+            { key: 'footerRight', name: 'Footer, right' },
+        ];
+        for (const f of hfFields) {
+            new Setting(containerEl)
+                .setName(f.name)
+                .addText(t => t
+                    .setPlaceholder(f.key.startsWith('header') ? '{title}' : '{date}')
+                    .setValue(this.plugin.settings[f.key])
+                    .onChange(async v => {
+                        this.plugin.settings[f.key] = v;
+                        await this.plugin.saveSettings();
+                    })
+                );
+        }
+
+        // ── PDF metadata ─────────────────────────────────────────────────────
+
+        new Setting(containerEl).setName('PDF metadata').setHeading();
+        containerEl.createEl('p', {
+            text: 'These fields are written into the PDF, where viewers show them in the document properties and the window title. For each field you can name the frontmatter property to read it from. Leave the box empty to use the default property shown in gray. When the property is missing or empty, the rule under each field applies.',
+            cls: 'setting-item-description',
+        });
+
+        new Setting(containerEl)
+            .setName('Embed metadata')
+            .setDesc('Turn off to leave all of the fields below out of the PDF.')
+            .addToggle(t => t
+                .setValue(this.plugin.settings.embedMetadata)
+                .onChange(async v => {
+                    this.plugin.settings.embedMetadata = v;
+                    await this.plugin.saveSettings();
+                })
+            );
+
+        for (const field of META_FIELDS) {
+            new Setting(containerEl)
+                .setName(field.label)
+                .setDesc(`${field.autoFill}`)
+                .addText(t => t
+                    .setPlaceholder(field.defaultKey)
+                    .setValue(this.plugin.settings.metadataKeys[field.id])
+                    .onChange(async v => {
+                        this.plugin.settings.metadataKeys[field.id] = v.trim();
+                        await this.plugin.saveSettings();
+                    })
+                );
+        }
+        for (const fixed of META_FIXED_INFO) {
+            new Setting(containerEl)
+                .setName(fixed.label)
+                .setDesc(`Always set automatically: ${fixed.value}. Not read from frontmatter.`);
+        }
+
+        // ── Per-note overrides ───────────────────────────────────────────────
+
+        new Setting(containerEl).setName('Per-note overrides').setHeading();
+        const ovInfo = containerEl.createDiv({ cls: 'pdfmake-info-box' });
+        ovInfo.createEl('p', { text: 'A note can change some settings for its own exports with these frontmatter properties. Invalid values are ignored with a message in the developer console.' });
+        const ovList = ovInfo.createEl('ul');
+        for (const [key, what] of [
+            [NOTE_KEYS.pageSize, 'LETTER, A4, LEGAL, TABLOID, A3 or A5'],
+            [NOTE_KEYS.orientation, 'portrait or landscape'],
+            [NOTE_KEYS.margins, 'one number, or four numbers: top right bottom left (points)'],
+            [NOTE_KEYS.mode, 'print or preserve (used by the default-mode export only)'],
+            [NOTE_KEYS.toc, 'true or false'],
+        ]) {
+            const li = ovList.createEl('li');
+            li.createEl('code', { text: key });
+            li.appendText(`: ${what}`);
+        }
+
         // ── Export ───────────────────────────────────────────────────────────
 
         new Setting(containerEl).setName('Output').setHeading();
@@ -284,6 +437,32 @@ export class PDFMakeSettingTab extends PluginSettingTab {
                         await this.plugin.saveSettings();
                     })
                 );
+
+            new Setting(containerEl)
+                .setName('First page number')
+                .setDesc('The number printed on the first page. The table of contents still counts pages from the start of the PDF.')
+                .addText(t => t
+                    .setPlaceholder('1')
+                    .setValue(String(this.plugin.settings.pageNumberStart))
+                    .onChange(async v => {
+                        const n = Number.parseInt(v, 10);
+                        if (Number.isFinite(n) && n >= 0 && n <= 9999) {
+                            this.plugin.settings.pageNumberStart = n;
+                            await this.plugin.saveSettings();
+                        }
+                    })
+                );
+
+            new Setting(containerEl)
+                .setName('Hide number on first page')
+                .setDesc('Later pages keep their numbers.')
+                .addToggle(t => t
+                    .setValue(this.plugin.settings.hidePageNumberOnFirstPage)
+                    .onChange(async v => {
+                        this.plugin.settings.hidePageNumberOnFirstPage = v;
+                        await this.plugin.saveSettings();
+                    })
+                );
         }
 
         new Setting(containerEl)
@@ -295,6 +474,41 @@ export class PDFMakeSettingTab extends PluginSettingTab {
                 .onChange(async v => {
                     this.plugin.settings.outputFolder = v.trim();
                     await this.plugin.saveSettings();
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('File name')
+            .setDesc('Template for the PDF file name, without .pdf. Variables: {file} (note name), {title}, {date} (YYYY-MM-DD) and {mode}. Characters not allowed in file names are removed. Export selection adds -selection to the end.')
+            .addText(t => t
+                .setPlaceholder('{file}-{mode}')
+                .setValue(this.plugin.settings.filenameTemplate)
+                .onChange(async v => {
+                    this.plugin.settings.filenameTemplate = v;
+                    await this.plugin.saveSettings();
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('Open the PDF after export')
+            .setDesc('Opens the saved PDF in a new tab.')
+            .addToggle(t => t
+                .setValue(this.plugin.settings.openAfterExport)
+                .onChange(async v => {
+                    this.plugin.settings.openAfterExport = v;
+                    await this.plugin.saveSettings();
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('Show ribbon icon')
+            .setDesc('Adds a ribbon button that exports the current note in the default mode.')
+            .addToggle(t => t
+                .setValue(this.plugin.settings.showRibbonIcon)
+                .onChange(async v => {
+                    this.plugin.settings.showRibbonIcon = v;
+                    await this.plugin.saveSettings();
+                    this.plugin.updateRibbon();
                 })
             );
     }
