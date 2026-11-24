@@ -1,6 +1,6 @@
 import { formatPageNumber } from './pageNumbers';
 import type { GridCell, PdfDocDef, PdfNode, PdfOut, PdfPageSize, PdfTableHost } from './pdfTypes';
-import { App, Notice, TFile, normalizePath } from 'obsidian';
+import { App, Notice, TFile, getAllTags, normalizePath } from 'obsidian';
 import {
     CalloutNode, ContentNode, ExportMode, ImageNode, MathNode, InlineSpan, ListNode, PDFMakeSettings,
     TableNode,
@@ -10,7 +10,10 @@ import { ImageLoader } from './images';
 import { renderNote, protectPageBreaks } from './noteRenderer';
 import { scanMath } from './mathSource';
 import { ExportProgress, yieldToUI } from './progress';
-import { applyFallbackFonts, FallbackResult } from './fallbackFonts';
+import { applyFallbackFonts, baseSafeText, FallbackResult } from './fallbackFonts';
+import { PdfInfo, resolveMetadata } from './metadata';
+import { applyNoteOverrides, parseNoteOverrides } from './noteOverrides';
+import { composeSlots, exportStem, localDate, SLOTS, Slot, TemplateVars } from './templates';
 
 // pdfmake and its font data are large; load them only when an export runs so
 // they don't slow down Obsidian startup.
@@ -189,8 +192,18 @@ function mixHex(color: string, base: string, alpha: number): string {
 
 // ── Exporter class ────────────────────────────────────────────────────────────
 
+export interface ExportOptions {
+    /** `markdown` is only a selected part of the note: its file name gets a "-selection" suffix. */
+    selection?: boolean;
+    /** The command used the default mode, so a `pdf-mode` frontmatter property may replace it. */
+    useNoteMode?: boolean;
+}
+
 export class PDFExporter {
     private images: ImageLoader;
+    private info: PdfInfo = { creator: '', creationDate: new Date() };
+    private exportedAt = new Date();
+    private baseName = '';
 
     constructor(
         private app: App,
@@ -200,7 +213,18 @@ export class PDFExporter {
         this.images = new ImageLoader(app);
     }
 
-    async exportNote(markdown: string, file: TFile, mode: ExportMode, progress?: ExportProgress): Promise<void> {
+    async exportNote(markdown: string, file: TFile, mode: ExportMode, progress?: ExportProgress, opts: ExportOptions = {}): Promise<void> {
+        // Per-note frontmatter: overrides for this export and the values for the PDF info fields.
+        const cache = this.app.metadataCache.getFileCache(file);
+        const fm: Record<string, unknown> | null = cache?.frontmatter ?? null;
+        const overrides = parseNoteOverrides(fm, msg => console.warn('[Print-Ready PDF]', msg));
+        this.settings = applyNoteOverrides(this.settings, overrides);
+        if (opts.useNoteMode && overrides.mode) mode = overrides.mode;
+        this.exportedAt = new Date();
+        this.baseName = file.basename;
+        const tags = (cache ? getAllTags(cache) : null) ?? [];
+        this.info = resolveMetadata(fm, this.settings.metadataKeys, { basename: file.basename, tags, exportedAt: this.exportedAt });
+
         await progress?.set('Rendering note…');
         const source = this.settings.pageBreakSyntax === 'callout' ? markdown : protectPageBreaks(markdown);
         const rendered = await renderNote(this.app, source, file.path, this.contentWidth() * 96 / 72);
@@ -231,7 +255,7 @@ export class PDFExporter {
         }
         this.checkCancelled();
         await progress?.set('Saving PDF…');
-        await this.saveBuffer(buffer, file, mode);
+        await this.saveBuffer(buffer, file, mode, opts.selection === true);
     }
 
     private checkCancelled(): void {
@@ -256,6 +280,13 @@ export class PDFExporter {
 
         this.imageDict.clear();
         const content = this.blocksToContent(nodes, { mode, fontSize: baseFontSize, availWidth: this.contentWidth() });
+        const { includeToc, tocMaxLevel, tocTitle } = this.settings;
+        let hasTocEntries = false;
+        if (includeToc) walkNodes(nodes, n => { if (n.type === 'heading' && n.level <= tocMaxLevel) hasTocEntries = true; });
+        if (hasTocEntries) {
+            const title = baseSafeText(tocTitle).trim();
+            content.unshift({ toc: title ? { title: { text: title, style: 'tocTitle' } } : {}, pageBreak: 'after' });
+        }
         // One XObject per distinct image, however many times it is used.
         const images: Record<string, string> = {};
         this.imageDict.forEach((key, url) => { images[key] = url; });
@@ -263,9 +294,10 @@ export class PDFExporter {
         return {
             content,
             ...(this.imageDict.size ? { images } : {}),
-            styles,
+            ...(this.settings.embedMetadata ? { info: { ...this.info }, displayTitle: true } : {}),
+            styles: hasTocEntries ? { ...styles, tocTitle: { fontSize: 20, bold: true, marginBottom: 8 } } : styles,
             defaultStyle: {
-                font: 'Helvetica',
+                font: this.settings.bodyFont === 'serif' ? 'Times' : 'Helvetica',
                 fontSize: baseFontSize,
                 color: defaultColor,
                 lineHeight: 1.45,
@@ -284,15 +316,63 @@ export class PDFExporter {
                     }],
                 }),
             } : {}),
-            ...(this.settings.includePageNumbers ? {
-                footer: (currentPage: number, pageCount: number) => ({
-                    text: formatPageNumber(this.settings.pageNumberFormat, currentPage, pageCount),
-                    style: 'pageFooter',
-                    alignment: this.settings.pageNumberAlign,
-                    margin: [marginLeft, 8, marginRight, 0],
-                }),
-            } : {}),
+            ...this.headerFooter(mode),
         };
+    }
+
+    /**
+     * Header and footer callbacks. With no header text, no footer text, a first page number of 1
+     * and numbers on every page, the footer is just the page number, as in earlier versions.
+     */
+    private headerFooter(mode: ExportMode): { header?: PdfNode | ((page: number, count: number) => PdfNode); footer?: (page: number, count: number) => PdfNode } {
+        const st = this.settings;
+        const { marginLeft, marginRight } = st;
+        const headerTexts: Record<Slot, string> = { left: st.headerLeft, center: st.headerCenter, right: st.headerRight };
+        const footerTexts: Record<Slot, string> = { left: st.footerLeft, center: st.footerCenter, right: st.footerRight };
+        const hasHeader = SLOTS.some(sl => headerTexts[sl].trim() !== '');
+        const hasFooterText = SLOTS.some(sl => footerTexts[sl].trim() !== '');
+        const start = Math.max(0, Math.floor(st.pageNumberStart));
+        const plainNumbers = start === 1 && !st.hidePageNumberOnFirstPage;
+        const title = this.info.title ?? this.baseName;
+        const vars = (page: number, last: number): TemplateVars => ({ title, file: this.baseName, mode, date: localDate(this.exportedAt), page, pages: last });
+        const row = (slots: Record<Slot, string>, margin: number[]): PdfNode => {
+            const filled = SLOTS.filter(sl => slots[sl] !== '');
+            if (filled.length === 0) return { text: '' };
+            if (filled.length === 1) return { text: slots[filled[0]], style: 'pageFooter', alignment: filled[0], margin };
+            return { columns: SLOTS.map(sl => ({ text: slots[sl], alignment: sl, width: '*' })), style: 'pageFooter', margin };
+        };
+        const safe = (slots: Record<Slot, string>): Record<Slot, string> => ({
+            left: baseSafeText(slots.left), center: baseSafeText(slots.center), right: baseSafeText(slots.right),
+        });
+
+        const out: { header?: (page: number, count: number) => PdfNode; footer?: (page: number, count: number) => PdfNode } = {};
+        if (hasHeader) {
+            const top = Math.max(10, st.marginTop / 2 - 6);
+            out.header = (page: number, count: number): PdfNode => {
+                const shown = page + start - 1;
+                return row(safe(composeSlots(headerTexts, vars(shown, count + start - 1), '', null)), [marginLeft, top, marginRight, 0]);
+            };
+        }
+        if (!hasFooterText && plainNumbers) {
+            if (st.includePageNumbers) {
+                out.footer = (currentPage: number, pageCount: number): PdfNode => ({
+                    text: formatPageNumber(st.pageNumberFormat, currentPage, pageCount),
+                    style: 'pageFooter',
+                    alignment: st.pageNumberAlign,
+                    margin: [marginLeft, 8, marginRight, 0],
+                });
+            }
+        } else if (st.includePageNumbers || hasFooterText) {
+            out.footer = (currentPage: number, pageCount: number): PdfNode => {
+                const shown = currentPage + start - 1;
+                const last = pageCount + start - 1;
+                const showNumber = st.includePageNumbers && !(st.hidePageNumberOnFirstPage && currentPage === 1);
+                const numText = showNumber ? formatPageNumber(st.pageNumberFormat, shown, last) : '';
+                const slots = composeSlots(footerTexts, vars(shown, last), numText, st.includePageNumbers ? st.pageNumberAlign : null);
+                return row(safe(slots), [marginLeft, 8, marginRight, 0]);
+            };
+        }
+        return out;
     }
 
     /** Only Preserve mode with the explicit dark-page opt-in renders a dark page. */
@@ -318,7 +398,7 @@ export class PDFExporter {
         }
     }
 
-    private async saveBuffer(buffer: Uint8Array, source: TFile, mode: ExportMode): Promise<void> {
+    private async saveBuffer(buffer: Uint8Array, source: TFile, mode: ExportMode, selection: boolean): Promise<void> {
         const vault = this.app.vault;
         const folder = this.settings.outputFolder
             ? normalizePath(this.settings.outputFolder)
@@ -328,7 +408,9 @@ export class PDFExporter {
 
         // Never overwrite an existing file: add " (1)", " (2)", … instead.
         const prefix = cleanFolder ? `${cleanFolder}/` : '';
-        const stem = `${source.basename}-${mode}`;
+        const stem = exportStem(this.settings.filenameTemplate, {
+            title: this.info.title ?? source.basename, file: source.basename, mode, date: localDate(this.exportedAt),
+        }, selection ? '-selection' : '');
         let outputPath = normalizePath(`${prefix}${stem}.pdf`);
         for (let n = 1; vault.getAbstractFileByPath(outputPath); n++) {
             outputPath = normalizePath(`${prefix}${stem} (${n}).pdf`);
@@ -338,8 +420,9 @@ export class PDFExporter {
         const data = (buffer.byteOffset === 0 && buffer.byteLength === buffer.buffer.byteLength
             ? buffer.buffer
             : buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)) as ArrayBuffer;
-        await vault.createBinary(outputPath, data);
+        const saved = await vault.createBinary(outputPath, data);
         new Notice(`PDF saved → ${outputPath}`);
+        if (this.settings.openAfterExport) await this.app.workspace.getLeaf('tab').openFile(saved);
     }
 
     // ── Images ───────────────────────────────────────────────────────────────
@@ -507,7 +590,7 @@ export class PDFExporter {
                 return {
                     text: this.spansToInline(node.content, rc),
                     style: `h${node.level}`,
-                    tocItem: node.level <= 3,
+                    tocItem: node.level <= (this.settings.includeToc ? this.settings.tocMaxLevel : 3),
                     alignment: node.align,
                     ...(node.id ? { id: node.id } : {}),
                 };
