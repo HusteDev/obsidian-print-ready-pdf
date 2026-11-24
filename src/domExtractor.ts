@@ -1,6 +1,6 @@
 import {
     Align, CalloutNode, ContentNode, HeadingNode, ImageNode, InlineSpan, ListItem, ListNode,
-    PAGEBREAK_SENTINEL, PageBreakSyntax, TableCell, TableNode,
+    CellFormat, PAGEBREAK_SENTINEL, PageBreakSyntax, TableCell, TableNode,
 } from './types';
 import { MathSource, simplifyTeX } from './mathSource';
 
@@ -51,6 +51,7 @@ const SKIP_SELECTOR = [
     '.heading-collapse-indicator', '.list-collapse-indicator', '.collapse-indicator',
     '.callout-icon', '.callout-fold', '.markdown-embed-link', '.edit-block-button',
     '.footnote-backref', '.markdown-embed-title', '.file-embed-link', '.cm-widgetBuffer',
+    '.rt-filter-bar', '.rt-drop-indicator',
 ].join(',');
 
 const INLINE_TAGS = new Set([
@@ -290,6 +291,7 @@ export class DomExtractor {
     // ── Tables ───────────────────────────────────────────────────────────────
 
     private table(el: HTMLElement): TableNode | null {
+        if (el.classList.contains('rt-table')) return this.rtable(el);
         const trs = Array.from(el.querySelectorAll('tr')).filter(tr => tr.closest('table') === el);
         if (!trs.length) return null;
         const rows: TableCell[][] = [];
@@ -318,6 +320,78 @@ export class DomExtractor {
             rows.push(cells);
         });
         return rows.length ? { type: 'table', rows, headerRows } : null;
+    }
+
+    /**
+     * A table from the Interactive Tables plugin (`rtable` code blocks), or one built from the same
+     * markup when that plugin is not installed. The editing handles (grip row, row gutter) are
+     * skipped; column spans, row spans, widths and cell formatting are read from the markup.
+     */
+    private rtable(el: HTMLElement): TableNode | null {
+        const rows: TableCell[][] = [];
+        for (const tr of Array.from(el.querySelectorAll('tbody > tr'))) {
+            if (tr.closest('table') !== el || (tr as HTMLElement).style.display === 'none') continue;
+            const cells: TableCell[] = [];
+            for (const child of Array.from(tr.children)) {
+                const cell = child as HTMLElement;
+                const tag = cell.tagName.toUpperCase();
+                if ((tag !== 'TD' && tag !== 'TH') || cell.classList.contains('rt-row-handle')) continue;
+                const align = this.alignOf(cell);
+                const content = cell.querySelector<HTMLElement>(':scope > .rt-cell-content') ?? cell;
+                const format = this.rtFormat(cell);
+                cells.push({
+                    content: this.blocks(content, align ? { align } : {}),
+                    header: rows.length === 0,
+                    colSpan: Math.max(1, parseInt(cell.getAttribute('colspan') ?? '1', 10) || 1),
+                    rowSpan: Math.max(1, parseInt(cell.getAttribute('rowspan') ?? '1', 10) || 1),
+                    align,
+                    ...(format ? { format } : {}),
+                });
+            }
+            if (cells.length) rows.push(cells);
+        }
+        if (!rows.length) return null;
+        const widths = Array.from(el.querySelectorAll<HTMLElement>('colgroup > col'))
+            .filter(col => !col.classList.contains('rt-gutter-col'))
+            .map(col => {
+                const n = parseFloat(col.style.width);
+                return Number.isFinite(n) && n > 0 ? n : null;
+            });
+        return { type: 'table', rows, headerRows: 1, ...(widths.some(w => w !== null) ? { colWidths: widths } : {}) };
+    }
+
+    /** Formatting the user set on an rtable cell: only values written inline on the cell count. */
+    private rtFormat(cell: HTMLElement): CellFormat | undefined {
+        const s = cell.style;
+        const f: CellFormat = {};
+        let cs: CSSStyleDeclaration | null = null;
+        try { cs = getComputedStyle(cell); } catch { /* no computed style: skip colours */ }
+        if (cs && s.backgroundColor) {
+            const c = parseCssColor(cs.backgroundColor);
+            if (c && c.a > 0) {
+                f.bg = c.hex;
+                if (c.a < 1) f.bgAlpha = c.a;
+            }
+        }
+        if (cs && s.color) {
+            const c = parseCssColor(cs.color);
+            if (c) f.color = c.hex;
+        }
+        if (s.fontWeight && (s.fontWeight === 'bold' || parseInt(s.fontWeight, 10) >= 600)) f.bold = true;
+        if (s.fontStyle === 'italic') f.italic = true;
+        if (s.textDecoration.includes('line-through') || s.textDecorationLine.includes('line-through')) f.strike = true;
+        if (s.fontSize.endsWith('em')) {
+            const k = parseFloat(s.fontSize);
+            if (Number.isFinite(k) && k > 0 && k !== 1) f.scale = k;
+        }
+        if (s.fontFamily) {
+            const fam = s.fontFamily;
+            if (fam.includes('font-monospace')) f.font = 'mono';
+            else if (fam.includes('font-interface')) f.font = 'sans';
+            else if (fam.includes('serif') || fam.includes('Georgia')) f.font = 'serif';
+            else console.warn('[Print-Ready PDF] A table cell font is not available in the PDF and was ignored:', fam);
+        }
+        return Object.keys(f).length ? f : undefined;
     }
 
     // ── Callouts and embeds ──────────────────────────────────────────────────
@@ -766,6 +840,15 @@ export function walkNodes(nodes: ContentNode[], fn: (n: ContentNode) => void): v
             case 'table': n.rows.forEach(r => r.forEach(c => walkNodes(c.content, fn))); break;
         }
     }
+}
+
+/** Reads rgb() and rgba() colours as browsers report them. */
+function parseCssColor(value: string): { hex: string; a: number } | null {
+    const m = /rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:[ ,/]+([\d.]+%?))?\s*\)/.exec(value);
+    if (!m) return null;
+    let a = 1;
+    if (m[4] !== undefined) a = m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]);
+    return { hex: rgbToHex(+m[1], +m[2], +m[3]), a: Number.isFinite(a) ? a : 1 };
 }
 
 function rgbToHex(r: number, g: number, b: number): string {

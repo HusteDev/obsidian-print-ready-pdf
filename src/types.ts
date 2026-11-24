@@ -181,8 +181,23 @@ export interface CalloutNode {
     content: ContentNode[];
 }
 
+/** Formatting a table cell carries from its source (rtable blocks). Colours are #rrggbb. */
+export interface CellFormat {
+    bg?: string;
+    /** Opacity of the background when it is a translucent tint. */
+    bgAlpha?: number;
+    color?: string;
+    bold?: boolean;
+    italic?: boolean;
+    strike?: boolean;
+    /** Font size relative to the table's size. */
+    scale?: number;
+    font?: 'sans' | 'serif' | 'mono';
+}
+
 export interface TableCell {
     content: ContentNode[];
+    format?: CellFormat;
     header: boolean;
     colSpan: number;
     rowSpan: number;
@@ -193,6 +208,8 @@ export interface TableNode {
     type: 'table';
     rows: TableCell[][];
     headerRows: number;
+    /** Column widths in CSS pixels where the source set them; null means automatic. */
+    colWidths?: (number | null)[];
 }
 
 export interface PageBreakNode {

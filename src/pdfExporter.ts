@@ -2,7 +2,7 @@ import { formatPageNumber } from './pageNumbers';
 import type { GridCell, PdfDocDef, PdfNode, PdfOut, PdfPageSize, PdfTableHost } from './pdfTypes';
 import { App, Notice, TFile, getAllTags, normalizePath } from 'obsidian';
 import {
-    CalloutNode, ContentNode, ExportMode, ImageNode, MathNode, InlineSpan, ListNode, PDFMakeSettings,
+    CalloutNode, CellFormat, ContentNode, ExportMode, ImageNode, MathNode, InlineSpan, ListNode, PDFMakeSettings,
     TableNode,
 } from './types';
 import { DomExtractor, cleanText, walkNodes } from './domExtractor';
@@ -836,6 +836,9 @@ export class PDFExporter {
         let layoutPad = 4;     // pdfmake cell padding, each side
         let cellMargin = 4;
         let { widths, fits, needSum } = this.columnWidths(grid, cols, rc, fs, cellPad);
+        if (node.colWidths?.some(w => w !== null && w !== undefined)) {
+            widths = this.specifiedWidths(widths, node.colWidths, cellPad, rc.availWidth);
+        }
         if (!fits) {
             // Too many columns for the page at normal size: shrink text and padding to fit.
             layoutPad = 1; cellMargin = 2; cellPad = 6;
@@ -865,6 +868,7 @@ export class PDFExporter {
                 if (fs !== rc.fontSize) obj.fontSize = fs;
                 if (cell.align && !obj.alignment) obj.alignment = cell.align;
                 if (isHeader) { obj.style = 'tableHeader'; obj.fillColor = headerBg; }
+                if (cell.format) this.applyCellFormat(obj, cell.format, mode, fs);
                 if (g.colSpan > 1) obj.colSpan = g.colSpan;
                 if (g.rowSpan > 1) obj.rowSpan = g.rowSpan;
                 out.push(obj);
@@ -889,6 +893,55 @@ export class PDFExporter {
             marginBottom: 8,
             marginTop: 4,
         };
+    }
+
+    /**
+     * Column widths when the source set some: those columns get their width (CSS pixels to points),
+     * the rest keep the automatic estimate, and everything shrinks together if it does not fit.
+     */
+    private specifiedWidths(auto: number[], specified: (number | null)[], pad: number, availWidth: number): number[] {
+        const desired = auto.map((w, c) => {
+            const px = specified[c];
+            return px === null || px === undefined ? w : px * 0.75 + pad;
+        });
+        const total = Math.max(40, availWidth - 1 - 0.5 * (auto.length + 1));
+        const sum = desired.reduce((a, b) => a + b, 0);
+        if (sum <= total) return desired;
+        const k = total / sum;
+        return desired.map(v => Math.max(pad + 4, v * k));
+    }
+
+    /**
+     * Applies a table cell's own formatting. Print mode in black and white keeps only weight,
+     * style, size and a light grey background; colours are kept elsewhere, with text colours
+     * checked against the cell background.
+     */
+    private applyCellFormat(obj: PdfNode, f: CellFormat, mode: ExportMode, fontSize: number): void {
+        const bw = this.isBw(mode);
+        const dark = this.isDark(mode);
+        const page = dark ? '#1e1e1e' : '#ffffff';
+        let surface = typeof obj.fillColor === 'string' ? obj.fillColor : page;
+        if (f.bg) {
+            const blended = mixHex(f.bg, page, f.bgAlpha ?? 1);
+            if (bw) {
+                const strength = 1 - (luminance(blended) ?? 1);
+                const level = Math.round(0xf4 - Math.max(0, Math.min(1, strength)) * 0x2a).toString(16).padStart(2, '0');
+                obj.fillColor = `#${level}${level}${level}`;
+            } else {
+                obj.fillColor = blended;
+            }
+            surface = obj.fillColor as string;
+        }
+        if (!bw) {
+            const readable = (surface === page || luminance(surface) === null) ? undefined : ((luminance(surface) as number) > 0.5 ? '#000000' : '#ffffff');
+            if (f.color) obj.color = hasContrast(f.color, surface) ? f.color : (readable ?? (dark ? '#ffffff' : '#000000'));
+            else if (f.bg && readable && !hasContrast(dark ? '#dcddde' : '#111111', surface)) obj.color = readable;
+        }
+        if (f.bold) obj.bold = true;
+        if (f.italic) obj.italics = true;
+        if (f.strike) obj.decoration = 'lineThrough';
+        if (f.scale) obj.fontSize = fontSize * f.scale;
+        if (f.font) obj.font = f.font === 'serif' ? 'Times' : f.font === 'mono' ? 'Courier' : 'Helvetica';
     }
 
     private listToContent(list: ListNode, rc: RC, marginBottom: number): PdfNode {
