@@ -12,6 +12,10 @@ import courier from '@foliojs-fork/pdfkit/js/data/Courier.afm';
 import courierBold from '@foliojs-fork/pdfkit/js/data/Courier-Bold.afm';
 import courierOblique from '@foliojs-fork/pdfkit/js/data/Courier-Oblique.afm';
 import courierBoldOblique from '@foliojs-fork/pdfkit/js/data/Courier-BoldOblique.afm';
+import timesRoman from '@foliojs-fork/pdfkit/js/data/Times-Roman.afm';
+import timesBold from '@foliojs-fork/pdfkit/js/data/Times-Bold.afm';
+import timesItalic from '@foliojs-fork/pdfkit/js/data/Times-Italic.afm';
+import timesBoldItalic from '@foliojs-fork/pdfkit/js/data/Times-BoldItalic.afm';
 
 export const FONTS = {
     Helvetica: {
@@ -19,6 +23,12 @@ export const FONTS = {
         bold: 'Helvetica-Bold',
         italics: 'Helvetica-Oblique',
         bolditalics: 'Helvetica-BoldOblique',
+    },
+    Times: {
+        normal: 'Times-Roman',
+        bold: 'Times-Bold',
+        italics: 'Times-Italic',
+        bolditalics: 'Times-BoldItalic',
     },
     Courier: {
         normal: 'Courier',
@@ -37,4 +47,8 @@ export const FONT_VFS: Record<string, string> = {
     'data/Courier-Bold.afm': courierBold,
     'data/Courier-Oblique.afm': courierOblique,
     'data/Courier-BoldOblique.afm': courierBoldOblique,
+    'data/Times-Roman.afm': timesRoman,
+    'data/Times-Bold.afm': timesBold,
+    'data/Times-Italic.afm': timesItalic,
+    'data/Times-BoldItalic.afm': timesBoldItalic,
 };

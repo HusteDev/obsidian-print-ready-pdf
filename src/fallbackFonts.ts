@@ -202,7 +202,7 @@ async function readFontBytes(app: App, path: string): Promise<ArrayBuffer> {
 // ── docDef rewriting ─────────────────────────────────────────────────────────
 
 const CHILD_KEYS = ['text', 'stack', 'ul', 'ol', 'columns', 'content', 'table', 'body'];
-const BASE_FONTS = new Set(['Helvetica', 'Courier']);
+const BASE_FONTS = new Set(['Helvetica', 'Times', 'Courier']);
 
 function collectUncovered(node: unknown, out: Set<number>): void {
     if (typeof node === 'string') {
@@ -216,6 +216,21 @@ function collectUncovered(node: unknown, out: Set<number>): void {
         const rec = node as Record<string, unknown>;
         for (const k of CHILD_KEYS) if (k in rec) collectUncovered(rec[k], out);
     }
+}
+
+/**
+ * Text for places the fallback fonts cannot reach (PDF header and footer text, table of
+ * contents title): characters the standard fonts lack become an ASCII stand-in or '?'.
+ */
+export function baseSafeText(text: string): string {
+    let out = '';
+    for (const ch of text) {
+        const cp = ch.codePointAt(0) as number;
+        if (isIgnorable(cp)) continue;
+        if (isBaseCovered(cp)) out += ch;
+        else out += ASCII_STAND_INS.get(cp) ?? '?';
+    }
+    return out;
 }
 
 export interface FallbackResult {
