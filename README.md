@@ -17,14 +17,59 @@ See the source and output: [example.md](docs/example.md) and [example.pdf](docs/
 - Page size (Letter, A4, Legal, Tabloid, A3, A5), orientation, margins, font size and page-number style (1, 1 of 10, 1 / 10, Page 1, Page 1 of 10, – 1 –; left, center or right) are set in the plugin's settings.
 - Math: `$$…$$` display math is typeset and embedded as vector graphics; inline `$…$` math is converted to plain text where possible (see Limitations).
 - Code blocks: "Shrink code blocks to fit" (on by default) reduces the font size so the longest line fits without wrapping, down to "Minimum code font size" (6 pt by default); longer lines wrap below that. "Show code block language" (off by default) adds a header bar across the top of each fenced code block that has a language, showing the language name.
+- PDF metadata: the title, author, subject and keywords are written into the PDF from frontmatter properties you choose, with auto-fill rules (see PDF metadata below).
+- Optional table of contents, header and footer text (`{title}`, `{date}`, `{page}`, `{pages}`, `{mode}`), a first page number and hiding the number on the first page.
+- Body font: sans (Helvetica, the default) or serif (Times). Code stays in Courier.
+- Per-note overrides in frontmatter: `pdf-page-size`, `pdf-orientation`, `pdf-margins`, `pdf-mode` and `pdf-toc`.
+- A file name template, an option to open the PDF after export, and an optional ribbon icon.
 - Exports never overwrite: if the file exists, a number is appended (`note-print (1).pdf`).
 
 ## Usage
 
 - Command palette: **Export to PDF (default mode)**, **Export to PDF (print optimized)** or **Export to PDF (preserve formatting)** (Obsidian shows them prefixed with the plugin name).
+- **Export selection to PDF** exports only the selected text. It is also in the editor's right-click menu when text is selected.
+- Ribbon icon (off by default; turn it on in the settings): exports the current note in the default mode.
 - File menu (the note's "More options" menu) and the file explorer's right-click menu: the same exports, prefixed "Print-Ready PDF:".
 
+All of the new options are off, or change nothing visible, until you turn them on. Every setting and frontmatter property is listed in [docs/settings.md](docs/settings.md).
+
 The PDF is saved into your vault, in the output folder if you set one, otherwise next to the exported note.
+
+## PDF metadata
+
+The plugin writes these fields into the PDF, where viewers show them in the document properties and the window title. In the settings (**PDF metadata**) you can name the frontmatter property to read each field from. Leave a box empty to use the default property. When the property is missing or empty:
+
+| Field | Default property | If the property is missing or empty |
+| --- | --- | --- |
+| Title | `title` | Auto-filled with the note name |
+| Author | `author` | Blank, left out of the PDF |
+| Subject | `subject` | Blank, left out of the PDF |
+| Keywords | `keywords` | Auto-filled with the note's tags, blank if it has none |
+| Creator | not read | Always "Print-Ready PDF Export" |
+| Creation date | not read | Always the time of the export |
+
+```yaml
+---
+title: Quarterly report
+author: Ann Lee
+keywords: [sales, report]
+---
+```
+
+## Per-note overrides
+
+A note can change a few settings for its own exports:
+
+```yaml
+---
+pdf-page-size: A4
+pdf-orientation: landscape
+pdf-margins: 36
+pdf-toc: true
+---
+```
+
+`pdf-margins` takes one number or four (`top right bottom left`) in points. `pdf-mode: print` or `preserve` replaces the mode of the default-mode commands only. Invalid values are ignored with a message in the developer console. Details: [docs/settings.md](docs/settings.md).
 
 ## What is exported
 
@@ -70,4 +115,4 @@ This plugin bundles the following open-source projects. Full licence texts and c
 - [MathJax](https://github.com/mathjax/MathJax-src), Apache License 2.0
 - [woff2-encoder](https://github.com/itskyedo/woff2-encoder), MIT
 - [DejaVu Sans](https://dejavu-fonts.github.io/) (a small symbol subset), Bitstream Vera licence with public-domain DejaVu changes
-- Adobe core 14 font metrics (AFM, distributed with pdfkit), Adobe's permissive AFM license
+- Adobe core 14 font metrics (Helvetica, Times and Courier AFM, distributed with pdfkit), Adobe's permissive AFM license

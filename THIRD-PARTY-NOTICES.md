@@ -8,7 +8,7 @@ The released `main.js` bundles the following open-source software. Each library'
 - [woff2-encoder](https://github.com/itskyedo/woff2-encoder) 2.x (WOFF2 decoder, WebAssembly build of Google's woff2 and brotli), MIT License
 - [MathJax](https://github.com/mathjax/MathJax-src) (`mathjax-full` 3.2.2, TeX input and SVG output with its bundled math fonts), Apache License 2.0
 - [DejaVu Sans](https://dejavu-fonts.github.io/) 2.37, a subset (Greek letters, arrows, mathematical operators, super/subscripts and a few symbols; about 58 KB) embedded as the built-in last-resort fallback font for inline math. Bitstream Vera licence with public-domain DejaVu changes (see below)
-- Adobe core 14 font metrics (AFM files for Helvetica and Courier), distributed with pdfkit under Adobe's permissive AFM license
+- Adobe core 14 font metrics (AFM files for Helvetica, Times and Courier), distributed with pdfkit under Adobe's permissive AFM license
 
 ## Contained in pdfmake's browser build
 
