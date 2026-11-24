@@ -1,5 +1,6 @@
 import { App, Component, MarkdownRenderer } from 'obsidian';
 import { PAGEBREAK_SENTINEL } from './types';
+import { renderRtableFallbacks } from './rtableDom';
 
 const SETTLE_TIMEOUT_MS = 10_000;
 const QUIET_MS = 300;
@@ -66,6 +67,7 @@ export async function renderNote(
     };
     try {
         await MarkdownRenderer.render(app, markdown, host, sourcePath, component);
+        await renderRtableFallbacks(app, host, sourcePath, component);
         await settle(host);
         return { el: host, dispose };
     } catch (err) {
