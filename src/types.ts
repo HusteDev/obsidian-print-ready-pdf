@@ -4,6 +4,9 @@ export type PageSize = 'LETTER' | 'A4' | 'LEGAL' | 'TABLOID' | 'A3' | 'A5';
 export type Orientation = 'portrait' | 'landscape';
 export type PageNumberFormat = 'n' | 'n-of-total' | 'n-slash-total' | 'page-n' | 'page-n-of-total' | 'dash-n-dash';
 export type PageNumberAlign = 'left' | 'center' | 'right';
+export type BodyFont = 'sans' | 'serif';
+/** PDF info fields that can be read from a frontmatter property. */
+export type MetaFieldId = 'title' | 'author' | 'subject' | 'keywords';
 
 export interface PDFMakeSettings {
     pageSize: PageSize;
@@ -24,6 +27,28 @@ export interface PDFMakeSettings {
     showCodeLanguage: boolean;
     codeMinFontSize: number;
     outputFolder: string;
+    /** Body text font: Helvetica (sans) or Times (serif). Code stays in Courier. */
+    bodyFont: BodyFont;
+    /** Write the title, author and other info into the PDF. */
+    embedMetadata: boolean;
+    /** Frontmatter property for each info field; empty means the field's default property. */
+    metadataKeys: Record<MetaFieldId, string>;
+    includeToc: boolean;
+    tocMaxLevel: 1 | 2 | 3;
+    tocTitle: string;
+    /** Header and footer text with {title}, {date}, {page}, {pages}, {mode}. Empty means none. */
+    headerLeft: string;
+    headerCenter: string;
+    headerRight: string;
+    footerLeft: string;
+    footerCenter: string;
+    footerRight: string;
+    pageNumberStart: number;
+    hidePageNumberOnFirstPage: boolean;
+    /** File name template with {file}, {title}, {date}, {mode}. */
+    filenameTemplate: string;
+    openAfterExport: boolean;
+    showRibbonIcon: boolean;
     /** Font files (vault path, or absolute path on desktop) used for characters the built-in fonts lack. */
     fallbackFonts: string[];
 }
@@ -47,6 +72,23 @@ export const DEFAULT_SETTINGS: PDFMakeSettings = {
     showCodeLanguage: false,
     codeMinFontSize: 6,
     outputFolder: '',
+    bodyFont: 'sans',
+    embedMetadata: true,
+    metadataKeys: { title: '', author: '', subject: '', keywords: '' },
+    includeToc: false,
+    tocMaxLevel: 3,
+    tocTitle: 'Contents',
+    headerLeft: '',
+    headerCenter: '',
+    headerRight: '',
+    footerLeft: '',
+    footerCenter: '',
+    footerRight: '',
+    pageNumberStart: 1,
+    hidePageNumberOnFirstPage: false,
+    filenameTemplate: '{file}-{mode}',
+    openAfterExport: false,
+    showRibbonIcon: false,
     fallbackFonts: [],
 };
 
